@@ -36,12 +36,18 @@ requires no paid API key for the basic install.
   (single DOM-walk JS scan), a deterministic (non-LLM) field-to-candidate
   mapping with an honest `requires_human` flag, filling (text/select/
   checkbox/file upload), HTML5 validation, multi-step navigation, and
-  screenshot + HTML-snapshot capture on failure. Not wired to any real
-  portal yet (Phase 7) or to CAPTCHA/OTP pause logic yet (Phase 6) —
-  those fixture pages exist now but nothing reacts to them until then.
+  screenshot + HTML-snapshot capture on failure.
+- **Phase 6 — Human Interrupt**: a standalone "apply" subgraph
+  (`app/graph/apply_*.py`) that wires Phase 5's form engine into four real
+  `interrupt()` pause points — an unrecognized/low-confidence field, an
+  OTP screen, a CAPTCHA screen, and manual approval before "submission" —
+  each resolved via `POST /api/applications/{id}/resume` and checkpointed
+  the same way as Phase 3's discovery interrupt. `AUTOMATION_DRY_RUN=true`
+  is enforced at the very last step regardless of approval. Exposed via
+  `/api/applications`.
 
-Everything else described in the architecture doc (portal adapters, human
-interrupt beyond scoring, dashboard, scheduler) lands in later phases.
+Everything else described in the architecture doc (a real portal adapter,
+dashboard, scheduler) lands in later phases.
 
 ## Quickstart
 
@@ -83,8 +89,9 @@ curl http://localhost:8000/api/profile
 ```
 
 Extraction in Phase 1 is deliberately **rule-based, not LLM-based** — resume
-"understanding" is an LLM task per the design spec, and the LLM isn't wired
-up until Phase 6. So today's extractor pulls what regex/section-scanning can
+"understanding" is an LLM task per the design spec, and no LLM is wired up
+yet (LLM integration isn't gated behind a specific numbered phase — see
+Sections 36-39). So today's extractor pulls what regex/section-scanning can
 get honestly (email, phone, a name guess, years of experience, skills
 matched against a vocabulary, and labeled sections like education/
 certifications) and leaves everything else — previous titles, companies,
@@ -196,10 +203,9 @@ status any time with `GET /api/runs/<run_id>`.
 
 ### Trying the form engine
 
-Not wired into the API yet (that happens when Phase 7 gives it a real
-portal, and Phase 6 gives it CAPTCHA/OTP pause logic) — today it's a
-library you drive directly against the local fixture pages under
-`tests/fixtures/html/`:
+Used directly as a library — for the version wired into a full apply
+flow with interrupts, see [Trying the apply flow](#trying-the-apply-flow)
+below:
 
 ```python
 import asyncio
@@ -234,11 +240,57 @@ see the sensitive categories in `app/browser/mapping.py`) is never guessed:
 it comes back with `candidate_value=None, requires_human=True` and
 `fill_form` leaves it untouched rather than filling something wrong.
 
+### Trying the apply flow
+
+`POST /api/applications` runs one job through the full apply subgraph —
+detect/map fields → fill/validate → pass any OTP/CAPTCHA challenge pages →
+manual approval → finalize — pausing for a human at four different points
+along the way (Section 19). No portal adapter exists yet (Phase 7), so
+`form_page_url`/`challenge_page_urls` point at local fixtures:
+
+```bash
+curl -X POST http://localhost:8000/api/applications \
+  -H "Content-Type: application/json" \
+  -d '{
+    "job": {"id": "job-1", "source": "demo", "url": "https://example.com/1",
+            "title": "CTO", "company": "Acme SaaS", "discovered_at": "2026-08-13T00:00:00Z",
+            "required_skills": [], "preferred_skills": [], "metadata": {}},
+    "form_page_url": "file:///.../tests/fixtures/html/simple_application_form.html",
+    "challenge_page_urls": ["file:///.../tests/fixtures/html/otp_screen.html"]
+  }'
+```
+
+The response pauses with `status: "waiting_human"` and an `interrupt`
+whose `reason` is one of:
+
+- `UNKNOWN_REQUIRED_FIELD` — a field the mapper wasn't confident about;
+  resolve with `{"payload": {"<field name>": "<answer>"}}`
+- `OTP_REQUIRED` — resolve with `{"payload": {"otp_code": "123456"}}`
+- `CAPTCHA_REQUIRED` — resolve with `{"payload": {"solved": true}}`
+  (the system never attempts to solve it itself — Section 12)
+- `MANUAL_APPROVAL_REQUIRED` — always fires last (the default
+  `approval.mode: manual`, Section 48), showing every field about to be
+  submitted; resolve with `{"payload": {"approved": true}}` or `false`
+
+```bash
+curl -X POST http://localhost:8000/api/applications/<id>/resume \
+  -H "Content-Type: application/json" \
+  -d '{"payload": {"otp_code": "123456"}}'
+```
+
+A completed run's `application_status` is `dry_run_ready` (the
+`AUTOMATION_DRY_RUN=true` default — nothing is ever actually submitted,
+even after approval, since there's no real portal to submit to yet) or
+`rejected_by_human` if the final approval was declined. Verified manually
+with a genuine process restart between the `OTP_REQUIRED` pause and its
+resume — same persistence guarantee as Phase 3's discovery interrupt.
+
 ## Local LLM setup (Ollama)
 
 The platform defaults to a local Ollama instance and never requires a paid
-API key. This is wired in starting Phase 6; for now `config/llm.yaml` and
-`.env.example` document the expected configuration:
+API key. Not wired up yet — no phase has needed an LLM so far (Sections
+2/17 push everything possible to deterministic code first); for now
+`config/llm.yaml` and `.env.example` document the expected configuration:
 
 ```bash
 # install Ollama separately: https://ollama.com
@@ -273,24 +325,27 @@ See [`SECURITY.md`](SECURITY.md) for the full safety model.
 ```text
 app/
   core/            configuration, logging
-  api/              FastAPI routes (health, profile, runs)
+  api/              FastAPI routes (health, profile, runs, applications)
   database/         async SQLAlchemy session/models
   profile/           candidate profile parsing — loader/parser/services (Phase 1)
   jobs/              NormalizedJob + portal-agnostic normalize_job() (Phase 2)
   matching/          job-candidate scoring engine — title/skills/experience/
                       salary/location/industry, all rule-based (Phase 2)
-  graph/             LangGraph supervisor — state/nodes/graph/service,
-                      mocked portals until Phase 7 (Phase 3)
-  agents/            LLM-driven agent steps (Phase 6+; empty for now)
+  graph/             LangGraph supervisor (state/nodes/graph/service,
+                      mocked portals until Phase 7 — Phase 3) + the apply
+                      subgraph (apply_state/apply_nodes/apply_graph/
+                      apply_service — Phase 6)
+  agents/            LLM-driven agent steps (empty until the LLM
+                      integration phase)
   guardrails/        deterministic policy engine — models/policy/engine,
                       12 checks, wired into graph/nodes.py's policy_guard (Phase 4)
   browser/           Playwright automation — manager/sessions/selectors/
-                      forms/mapping/screenshots/errors (Phase 5)
+                      forms/mapping/detection/screenshots/errors (Phase 5-6)
   portals/           portal adapters (Phase 7+)
-  llm/               local LLM provider abstraction (Phase 6)
+  llm/               local LLM provider abstraction (not yet built)
   observability/ notifications/ scheduler/ security/
 config/              YAML domain configuration
-prompts/             versioned LLM prompts (Phase 6+)
+prompts/             versioned LLM prompts (not yet used — no LLM wired up yet)
 tests/               unit / integration / e2e / fixtures / mocks
 migrations/           Alembic migrations
 ```

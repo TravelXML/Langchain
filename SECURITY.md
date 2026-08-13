@@ -20,10 +20,12 @@ The system will **never**:
 
 If a CAPTCHA or OTP/MFA challenge is encountered, the run pauses, persists
 state, and waits for manual completion — it is never worked around
-programmatically. (Phase 5 built the CAPTCHA/OTP fixture pages used to test
-this; the detection + pause wiring itself is Phase 6's "Human Interrupt"
-phase — Phase 3 already proved the same pause/persist/resume mechanism
-works, for the unrelated case of a job needing human score review.)
+programmatically. Implemented in Phase 6 (`app/graph/apply_nodes.py`'s
+`check_challenges_node`, detecting via `app/browser/detection.py`): the
+resume payload for a CAPTCHA is a plain `{"solved": true}` human
+confirmation, never a solve attempt by the system itself; an OTP resume
+carries the code the human read off their own device (`{"otp_code":
+"..."}`), never one the system obtained on its own.
 
 ## Defaults
 
@@ -52,9 +54,9 @@ Both must be changed explicitly and are never auto-escalated by the system.
   `data/*.db` — both directories are gitignored and must never be committed.
 - The candidate profile database row stores raw resume/cover-letter text
   directly (Section 27's `candidate_profiles` table); this is local-only
-  data by design (SQLite in dev) and is never sent anywhere except the
-  configured local LLM (Phase 6+) or a portal application form the
-  candidate explicitly submits.
+  data by design (SQLite in dev) and is never sent anywhere except a
+  future configured local LLM or a portal application form the candidate
+  explicitly submits.
 - Browser session cookies/local storage (`BROWSER_SESSIONS_DIR`, per-portal
   under `data/browser_sessions/`) and failure screenshots/HTML snapshots
   (`BROWSER_ARTIFACTS_DIR`, `data/browser_artifacts/`) can both contain PII

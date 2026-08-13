@@ -33,7 +33,9 @@ class FieldMapping(BaseModel):
     candidate_value: str | None
     confidence: float = Field(ge=0.0, le=1.0)
     requires_human: bool
-    source: Literal["profile", "unmapped"]
+    # "human" (Phase 6): the value came from a human answering an
+    # unknown-field interrupt, not from the candidate profile directly.
+    source: Literal["profile", "unmapped", "human"]
     reason: str
 
 

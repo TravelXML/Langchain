@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes both the current (Phase 0-5) implementation and the
+This document describes both the current (Phase 0-6) implementation and the
 target architecture the project is being built toward, phase by phase. Where
 a component is not yet implemented, it is marked **(planned)**.
 
@@ -18,7 +18,7 @@ flowchart LR
     Candidate --> Dashboard
 ```
 
-## Current implementation (Phase 0-5)
+## Current implementation (Phase 0-6)
 
 ```mermaid
 flowchart TB
@@ -68,8 +68,10 @@ flowchart LR
 ```
 
 Extraction is **deterministic, not LLM-based** — per Section 2 of the design
-spec, resume "understanding" is an LLM capability, but the LLM isn't wired
-up until Phase 6. So Phase 1's parser only populates fields a defensible
+spec, resume "understanding" is an LLM capability, but no LLM is wired up
+yet (the phase list runs 0-10 and never assigns LLM integration a number —
+Sections 36-39 describe it but it isn't gated behind a specific phase). So
+Phase 1's parser only populates fields a defensible
 rule can produce (regex for email/phone/years-of-experience, section-header
 scanning for education/certifications/languages/achievements, vocabulary
 matching for skills). Fields that genuinely need semantic understanding
@@ -269,12 +271,11 @@ module, Playwright-independent — pure function over `DetectedField` +
 (`DetectedField`, `FieldMapping`, `FormFillResult`).
 
 **Deterministic, not LLM-based — same reasoning as every prior phase.**
-Phase 5 has no LLM yet (Phase 6); `mapping.py`'s keyword-pattern table
-handles label→field recognition, exactly the kind of task Section 2 says
-shouldn't wait for one. A future LLM-backed classifier (Phase 6) can
-replace the matching logic without changing `FieldMapping`'s shape or any
-caller — same swap-without-breaking-callers pattern as `semantic.py` in
-Phase 2.
+No LLM is wired up yet; `mapping.py`'s keyword-pattern table handles
+label→field recognition, exactly the kind of task Section 2 says shouldn't
+wait for one. A future LLM-backed classifier can replace the matching
+logic without changing `FieldMapping`'s shape or any caller — same
+swap-without-breaking-callers pattern as `semantic.py` in Phase 2.
 
 **Confidence and "requires human" are never conflated with the field
 simply having no known pattern.** Section 20's exact output shape
@@ -295,12 +296,82 @@ because there is structurally nothing to guess from.
 **Fixtures, not production portals** (Section 42): `tests/fixtures/html/`
 has all ten required scenarios — simple form, multi-step, dropdown,
 resume upload, required fields, an unrecognized field, OTP screen, CAPTCHA
-screen, success page, failure page. The OTP/CAPTCHA/success/failure pages
-are fixtures only for now; nothing detects or reacts to them yet — that
-wiring is Phase 6 (interrupt logic) and Phase 7 (submission verification)
-respectively. All 11 e2e tests in `tests/e2e/test_form_engine.py` run
+screen, success page, failure page. The OTP/CAPTCHA screens are detected
+and paused on starting Phase 6 (see below); success/failure page handling
+is Phase 7's submission-verification job. All 11 e2e tests in
+`tests/e2e/test_form_engine.py` run
 against a real headless Chromium instance via `file://` URLs, no server
 required.
+
+### Apply subgraph — human interrupt (Phase 6)
+
+```mermaid
+flowchart TB
+    START --> Detect[detect_and_map_fields]
+    Detect -->|any field requires_human| InterruptUnknown["interrupt()\nUNKNOWN_REQUIRED_FIELD"]
+    InterruptUnknown -.->|Command resume: field answers| Detect
+    Detect --> Fill[fill_and_validate]
+    Fill --> Challenges[check_challenges]
+    Challenges -->|OTP screen detected| InterruptOtp["interrupt()\nOTP_REQUIRED"]
+    InterruptOtp -.->|Command resume: otp_code| Challenges
+    Challenges -->|CAPTCHA screen detected| InterruptCaptcha["interrupt()\nCAPTCHA_REQUIRED"]
+    InterruptCaptcha -.->|Command resume: solved| Challenges
+    Challenges --> Approval[manual_approval]
+    Approval -->|approval.mode: manual, the default| InterruptApproval["interrupt()\nMANUAL_APPROVAL_REQUIRED"]
+    InterruptApproval -.->|Command resume: approved| Approval
+    Approval --> Finalize[finalize_application]
+    Finalize --> END
+```
+
+A **separate, standalone graph** from the Phase 3 supervisor above — not
+spliced into `application_queue`'s processing. Section 4's full picture
+shows one continuous pipeline from discovery through submission, but
+wiring the two together needs a real `application_queue` → apply hand-off,
+which is Phase 7's job (once there's a real portal to apply *to*). Keeping
+Phase 6 standalone meant zero regressions to Phase 3/4's already-passing
+tests while still proving the interrupt mechanics for real.
+
+Implemented in `app/graph/`: `apply_state.py` (`ApplicationState`),
+`apply_nodes.py` (5 nodes, linear, one job at a time — matching Section
+24's conservative `application_concurrency: 1`), `apply_graph.py` (wiring
++ its own checkpointer, same allow-listed-msgpack pattern as the
+supervisor graph), `apply_service.py` (backing `/api/applications`).
+
+**No live browser `Page` is ever held across an `interrupt()`.** Every
+node that touches the browser opens and closes it within that single call
+— `interrupt()` can pause for an arbitrary amount of real time, possibly
+across a process restart (Section 26), and a `Page` object cannot survive
+either. Verified: `launch_browser()` is called fresh inside
+`detect_and_map_fields_node`, `fill_and_validate_node`, and once per page
+inside `check_challenges_node`'s loop — never held in `ApplicationState`
+itself (which only stores plain data: `job`, `candidate_profile`,
+`field_mappings`, page URLs).
+
+**Sequential `interrupt()` calls within one node work as LangGraph's docs
+imply but this repo hadn't exercised before Phase 6** — `check_challenges_node`
+loops over `challenge_page_urls` and can call `interrupt()` once per
+challenge page; each `Command(resume=...)` satisfies the next pending call
+in order, with everything before it re-running deterministically (it's
+pure) rather than re-pausing. Confirmed via a standalone probe before
+committing to the design (see the multi-interrupt test scenarios in
+`tests/e2e/test_apply_graph.py`).
+
+**Manual approval always fires last and is the real Section 48 default**:
+`manual_approval_node` reads `config/automation.yaml`'s `approval.mode`
+(default `"manual"`) and interrupts showing every field about to be
+submitted (`MANUAL_APPROVAL_REQUIRED`, carrying the full `field_mappings`
+list) — "hybrid" mode's score-based auto-approval carve-out isn't
+implemented yet (falls back to manual), since there's no real
+`application_queue` driving this graph yet to have a score to check.
+`"automatic"` mode skips the interrupt entirely.
+
+**Dry-run is enforced at the very last step regardless of approval**:
+`finalize_application_node` checks `AUTOMATION_DRY_RUN` (default `true`)
+*after* approval, not before — an approved application still ends in
+`dry_run_ready`, never `submitted_mock`, until dry-run is explicitly
+turned off (Section 47). Verified live with a genuine process kill/restart
+between an `OTP_REQUIRED` pause and its resume — same guarantee Phase 3
+already proved for the unrelated score-review interrupt.
 
 ### Target LangGraph workflow (Phase 3 done through Guard; rest planned)
 
@@ -394,23 +465,26 @@ stateDiagram-v2
 
 ## Human-in-the-loop flow
 
-One real instance of this pattern exists today (Phase 3): a job scoring in
-the `human_review` band pauses the run via LangGraph's `interrupt()`. The
-rest — CAPTCHA, OTP, unknown-field, low-confidence-mapping interrupts, and
-a dedicated `/api/human-actions` review queue — are Phase 5/6+, once there's
-a browser/form layer and portal-specific unknowns to interrupt for. The
-mechanism (persist → notify → resolve → resume) is identical; only the
-*reasons* and the API surface expand.
+Five real interrupt reasons exist today, across two graphs: the Phase 3
+supervisor pauses when a job scores in the `human_review` band
+(`/api/runs/{id}/resume`); the Phase 6 apply subgraph pauses for
+`UNKNOWN_REQUIRED_FIELD`, `OTP_REQUIRED`, `CAPTCHA_REQUIRED`, and
+`MANUAL_APPROVAL_REQUIRED` (`/api/applications/{id}/resume`). A dedicated,
+unified `/api/human-actions` review queue spanning both graphs is still
+planned — today each graph's own resume endpoint is authoritative for its
+own interrupts. The mechanism (persist → notify → resolve → resume) is
+identical across all five; only the *reason* and which endpoint handles it
+differ.
 
 ```mermaid
 sequenceDiagram
     participant Graph as LangGraph run
     participant State as Checkpointer (SQLite)
     participant User as Candidate
-    Graph->>Graph: score_jobs / policy_guard: job in human_review band (today)<br/>or CAPTCHA / OTP / unknown field (planned, Phase 5/6+)
+    Graph->>Graph: policy_guard: job in human_review band<br/>or apply_nodes: unknown field / OTP / CAPTCHA / manual approval
     Graph->>State: interrupt() persists state + reason automatically
     Graph-->>User: response carries status: "waiting_human" + reason
-    User->>State: resolve via POST /api/runs/{id}/resume (today)<br/>or /api/human-actions/{id}/resolve (planned)
+    User->>State: resolve via POST /api/runs/{id}/resume<br/>or POST /api/applications/{id}/resume
     State-->>Graph: Command(resume=decision)
     Graph->>Graph: continue from the exact interrupt() call site
 ```
@@ -501,3 +575,12 @@ everything directly); it exists for the optional production path.
   engine uses local HTML fixtures (Phase 5, Section 42). Both are
   real code exercised by real automation (a real headless browser, a
   real LangGraph run) — only the *target* is local and disposable.
+- **The system never solves what it must instead pause for.** CAPTCHA
+  and OTP resume payloads are always a human's own input (a confirmation,
+  a code read off their device) — never a solve attempt, a bypass, or a
+  system-obtained value (Section 12, enforced in `apply_nodes.py`'s
+  `check_challenges_node`).
+- **A live resource is never held across an `interrupt()`.** The apply
+  subgraph's nodes open and close the browser within a single node call;
+  nothing that can't survive a process restart is ever stored in graph
+  state (Section 26, Phase 6).
