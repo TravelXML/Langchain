@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes both the current (Phase 0-1) implementation and the
+This document describes both the current (Phase 0-2) implementation and the
 target architecture the project is being built toward, phase by phase. Where
 a component is not yet implemented, it is marked **(planned)**.
 
@@ -82,6 +82,65 @@ schema with `source="llm"` without changing any downstream consumer.
 The system is single-candidate/local-first: `candidate_profiles` has exactly
 one row, addressed by the fixed id `"default"` (see
 `app/database/models/candidate_profile.py`).
+
+### Job model + matching engine (Phase 2)
+
+```mermaid
+flowchart TB
+    RawJob["raw job dict\n(portal-agnostic shape)"] --> Normalize[jobs.parser.normalize_job]
+    Normalize --> NormalizedJob["NormalizedJob\n(id derived from source+external_id/url)"]
+
+    NormalizedJob --> Scorer[matching.scorer.score_job]
+    Preferences[CandidatePreferences] --> Scorer
+    CandidateSkills["candidate skills + experience_years\n(from ResumeExtraction)"] --> Scorer
+
+    Scorer --> Title[title.match_title]
+    Scorer --> Skills[skills.match_skills]
+    Scorer --> Experience[experience.score_experience]
+    Scorer --> Salary[salary.score_salary]
+    Scorer --> Location[location.score_location]
+    Scorer --> Industry[industry.score_industry]
+
+    ScoringYaml["config/scoring.yaml\nweights + thresholds"] --> Scorer
+
+    Title --> Breakdown[ScoreBreakdown]
+    Skills --> Breakdown
+    Experience --> Breakdown
+    Salary --> Breakdown
+    Location --> Breakdown
+    Industry --> Breakdown
+
+    Breakdown --> Explanation[explanation.build_explanation]
+    Explanation --> MatchResult["MatchResult\n(overall_score, breakdown, reason, recommendation)"]
+```
+
+Every sub-scorer is pure rule-based logic — no LLM, no embeddings. Section
+16 calls for a hybrid model (`exact rules + keyword normalization + skill
+aliases + embedding similarity + optional LLM review`); Phase 2 implements
+the first three (`skills.py`'s alias table resolves e.g. "Amazon Web
+Services" → "AWS"; `title.py`'s family table resolves "Chief Technology
+Officer" → the "CTO" family). Embedding similarity (Section 38) and LLM
+semantic review are later additions layered on top — `semantic.py`
+currently provides a deterministic token-overlap fallback (used by
+`title.py` for titles outside every known family) with the same shape an
+embedding-based implementation would have, so swapping it in later doesn't
+change any caller.
+
+Scoring never invents data to fill gaps — a job that doesn't disclose a
+salary or experience range scores that dimension neutrally rather than
+being guessed at or penalized (Section 17). Weights (title 25 / skills 30 /
+experience 15 / industry 10 / location 10 / compensation 10) and
+recommendation thresholds (`priority_apply` ≥90, `normal_apply` ≥80,
+`apply_if_capacity` ≥75, `human_review` ≥60, else `reject`) both come from
+`config/scoring.yaml`, never hardcoded in Python.
+
+`NormalizedJob` (`app/jobs/models.py`) is the common schema every portal
+adapter will normalize into (Phase 7+); portal-specific fields go under
+`metadata` rather than contaminating the shared model (Section 8). No
+`jobs`/`job_scores` database tables exist yet — Phase 2 is a pure scoring
+library, exercised directly in tests and the README example; persistence
+arrives with the LangGraph pipeline in Phase 3, which is what actually
+discovers and needs to store jobs.
 
 ## Target LangGraph workflow (planned, Phase 3+)
 
@@ -207,8 +266,10 @@ Phase 0 shipped only the async engine/session foundation
 resume and cover-letter data live as JSON/text columns on one row rather
 than versioned child tables, since there's exactly one local candidate and
 no version history yet. Remaining tables are introduced as migrations in
-the phases that need them (job/score tables in Phase 2, application tables
-in Phase 3+), per Section 27 of the design spec.
+the phases that need them — Phase 2 turned out to need none (it's a pure
+scoring library with no discovery pipeline to persist yet); `jobs`/
+`job_scores`/application tables arrive with the LangGraph pipeline in
+Phase 3+, per Section 27 of the design spec.
 
 ## Deployment architecture (planned)
 

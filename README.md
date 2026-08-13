@@ -15,10 +15,15 @@ requires no paid API key for the basic install.
 - **Phase 1 — Candidate Profile**: resume/cover-letter PDF ingestion,
   deterministic (non-LLM) structured extraction, `candidate_profiles` table,
   `/api/profile` (`GET`, `POST /import`, `PUT`).
+- **Phase 2 — Job Model + Matching Engine**: `NormalizedJob` + portal-agnostic
+  `normalize_job()`, and a fully rule-based weighted scorer
+  (`app/matching/`) covering title/seniority, skills (with alias
+  normalization), experience, salary, location, and industry — configurable
+  via `config/scoring.yaml`, no LLM or API involved.
 
-Everything else described in the architecture doc (matching engine,
-LangGraph orchestration, portal adapters, browser automation, dashboard,
-scheduler) lands in later phases.
+Everything else described in the architecture doc (LangGraph orchestration,
+portal adapters, browser automation, dashboard, scheduler) lands in later
+phases.
 
 ## Quickstart
 
@@ -69,6 +74,56 @@ industries — as `{"value": null, "confidence": 0.0, "source": "unextracted"}`
 rather than guessing. See `app/profile/parser.py` and Section 6/17 of the
 architecture spec ("never invent information missing from the resume").
 
+### Scoring a job against the candidate
+
+There's no discovery pipeline yet (that's Phase 3+), so for now scoring is
+a library call, not an endpoint — `app.jobs.parser.normalize_job()` turns a
+raw job dict into a `NormalizedJob`, and `app.matching.scorer.score_job()`
+scores it against `CandidatePreferences` + resume skills/experience:
+
+```python
+from app.jobs.parser import normalize_job
+from app.matching.scorer import score_job
+from app.profile.models import CandidatePreferences
+
+job = normalize_job(
+    {
+        "url": "https://boards.greenhouse.io/acme/jobs/4821",
+        "title": "Chief Technology Officer",
+        "company": "Acme TravelTech",
+        "location": "Bengaluru, India",
+        "work_mode": "hybrid",
+        "salary_min": 45, "salary_max": 65, "salary_currency": "INR",
+        "required_skills": ["Cloud Architecture", "Engineering Leadership", "AWS"],
+        "preferred_skills": ["Agentic AI", "Kubernetes"],
+        "minimum_experience": 15,
+        "industry": "TravelTech",
+    },
+    source="greenhouse",
+)
+
+result = score_job(
+    job,
+    preferences=CandidatePreferences(
+        target_positions=["CTO", "VP Technology"],
+        preferred_industries=["TravelTech", "SaaS"],
+        locations_preferred=["Bengaluru", "Remote"],
+        relocation_allowed=True,
+        work_mode=["remote", "hybrid"],
+        compensation_currency="INR", compensation_minimum=30, compensation_preferred=50,
+    ),
+    candidate_skills=["Cloud Architecture", "Engineering Leadership", "Amazon Web Services", "Agentic AI"],
+    candidate_experience_years=20,
+)
+# result.overall_score == 95.5, result.recommendation == "priority_apply"
+# "Amazon Web Services" was recognized as "AWS" via alias normalization.
+```
+
+Scoring is entirely deterministic — no LLM, no embeddings (Section 16/38
+add those as an *additional* signal in a later phase; the rule-based score
+is never replaced by them). Weights and thresholds come from
+`config/scoring.yaml`.
+
 ## Local LLM setup (Ollama)
 
 The platform defaults to a local Ollama instance and never requires a paid
@@ -112,7 +167,9 @@ app/
   database/         async SQLAlchemy session/models
   agents/ graph/     LangGraph orchestration (Phase 3+)
   profile/           candidate profile parsing — loader/parser/services (Phase 1)
-  matching/          job-candidate scoring engine (Phase 2)
+  jobs/              NormalizedJob + portal-agnostic normalize_job() (Phase 2)
+  matching/          job-candidate scoring engine — title/skills/experience/
+                      salary/location/industry, all rule-based (Phase 2)
   guardrails/        deterministic policy engine (Phase 4)
   browser/           Playwright automation (Phase 5)
   portals/           portal adapters (Phase 7+)
