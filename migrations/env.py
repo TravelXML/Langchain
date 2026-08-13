@@ -6,12 +6,12 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+# Importing app.database.models registers every ORM model module on
+# Base.metadata (see app/database/models/__init__.py), so autogenerate can
+# see them.
+import app.database.models  # noqa: F401,E402
 from app.core.config import get_settings
 from app.database.base import Base
-
-# Import ORM models here as they are added in later phases so autogenerate
-# can see them, e.g.:
-# from app.database.models import candidate_profile  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

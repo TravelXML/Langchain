@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     approval_mode: str = Field(default="manual", alias="APPROVAL_MODE")
 
     config_dir: Path = Field(default=Path("./config"), alias="CONFIG_DIR")
+    upload_dir: Path = Field(default=Path("./data/uploads"), alias="UPLOAD_DIR")
 
 
 @functools.lru_cache

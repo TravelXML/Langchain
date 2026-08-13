@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health
+from app.api.routes import health, profile
 from app.core.config import get_settings
 from app.core.logging import bind_correlation_id, clear_context, configure_logging, get_logger
 
@@ -53,6 +53,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": "internal_server_error"})
 
     app.include_router(health.router)
+    app.include_router(profile.router)
 
     return app
 

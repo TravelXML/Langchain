@@ -25,6 +25,8 @@ dependencies = [
   "langgraph>=0.1",
   "langchain-core>=0.2",
   "playwright>=1.44",
+  "pypdf>=4.2",
+  "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +37,7 @@ dev = [
   "black>=24.4",
   "mypy>=1.10",
   "pre-commit>=3.7",
+  "reportlab>=4.2",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -50,6 +53,12 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's dependency-injection pattern is Depends(...) as an argument
+# default — that's idiomatic here, not the mutable-default footgun B008
+# otherwise guards against.
+"app/api/routes/*.py" = ["B008"]
 
 [tool.black]
 line-length = 100

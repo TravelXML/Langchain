@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes both the current (Phase 0) implementation and the
+This document describes both the current (Phase 0-1) implementation and the
 target architecture the project is being built toward, phase by phase. Where
 a component is not yet implemented, it is marked **(planned)**.
 
@@ -18,19 +18,27 @@ flowchart LR
     Candidate --> Dashboard
 ```
 
-## Current implementation (Phase 0)
+## Current implementation (Phase 0-1)
 
 ```mermaid
 flowchart TB
     Client -->|HTTP| FastAPIApp[app.main:app]
     FastAPIApp --> CorrelationMW[Correlation-ID middleware]
     FastAPIApp --> HealthRoute["/health"]
+    FastAPIApp --> ProfileRoutes["/api/profile (GET, POST /import, PUT)"]
     HealthRoute --> Settings[app.core.config.Settings]
     HealthRoute --> DBCheck[check_database_connection]
+    ProfileRoutes --> ProfileService[app.profile.profile_service]
+    ProfileService --> ResumeService[resume_service]
+    ProfileService --> CoverLetterService[cover_letter_service]
+    ResumeService --> Loader[loader: pypdf text extraction]
+    ResumeService --> Parser[parser: deterministic regex/section heuristics]
+    ProfileService --> DBCheck
     DBCheck --> Engine[async SQLAlchemy engine]
     Engine --> SQLite[(SQLite dev / PostgreSQL prod)]
     Settings --> YamlLoader[YamlConfigLoader]
     YamlLoader --> YamlFiles["config/*.yaml"]
+    ProfileService --> YamlLoader
 ```
 
 Configuration is layered:
@@ -45,6 +53,35 @@ Configuration is layered:
 Logging is JSON-structured (`structlog`), with a per-request correlation ID
 bound via contextvars and a redaction processor that strips sensitive keys
 (passwords, tokens, cookies, OTPs, secrets) before anything is emitted.
+
+### Candidate profile (Phase 1)
+
+```mermaid
+flowchart LR
+    PDF[resume.pdf] --> Loader[loader.extract_text_from_pdf]
+    Loader --> Parser[parser.parse_resume_text]
+    ConfigSkills["config/candidate.yaml skills"] --> Parser
+    Parser --> ResumeExtraction["ResumeExtraction\n(every field: value/source/confidence)"]
+    ResumeExtraction --> ProfileRecord[(candidate_profiles table)]
+    CoverLetterPdf[cover_letter.pdf] --> CLLoader[loader.extract_text_from_pdf]
+    CLLoader --> ProfileRecord
+```
+
+Extraction is **deterministic, not LLM-based** — per Section 2 of the design
+spec, resume "understanding" is an LLM capability, but the LLM isn't wired
+up until Phase 6. So Phase 1's parser only populates fields a defensible
+rule can produce (regex for email/phone/years-of-experience, section-header
+scanning for education/certifications/languages/achievements, vocabulary
+matching for skills). Fields that genuinely need semantic understanding
+(previous titles, companies, industries) are left as
+`{"value": null, "confidence": 0.0, "source": "unextracted"}` rather than
+guessed — see Section 17 ("never invent information missing from the
+resume"). A future LLM-backed extractor fills the same `ExtractedField`
+schema with `source="llm"` without changing any downstream consumer.
+
+The system is single-candidate/local-first: `candidate_profiles` has exactly
+one row, addressed by the fixed id `"default"` (see
+`app/database/models/candidate_profile.py`).
 
 ## Target LangGraph workflow (planned, Phase 3+)
 
@@ -162,11 +199,16 @@ erDiagram
     APPLICATIONS ||--o{ AUDIT_EVENTS : logs
 ```
 
-Phase 0 ships no application tables yet — only the async engine/session
-foundation (`app/database/base.py`, `app/database/session.py`) and Alembic
-wiring (`migrations/`). Tables are introduced as migrations in the phases
-that need them (profile tables in Phase 1, job/score tables in Phase 2,
-application tables in Phase 3+), per Section 27 of the design spec.
+Phase 0 shipped only the async engine/session foundation
+(`app/database/base.py`, `app/database/session.py`) and Alembic wiring
+(`migrations/`) — no tables. Phase 1 adds the first one, `candidate_profiles`
+(migration `99cc354684f4`), a simplified single-row version of the planned
+`CANDIDATE_PROFILES`/`RESUME_VERSIONS`/`COVER_LETTER_VERSIONS` split above —
+resume and cover-letter data live as JSON/text columns on one row rather
+than versioned child tables, since there's exactly one local candidate and
+no version history yet. Remaining tables are introduced as migrations in
+the phases that need them (job/score tables in Phase 2, application tables
+in Phase 3+), per Section 27 of the design spec.
 
 ## Deployment architecture (planned)
 

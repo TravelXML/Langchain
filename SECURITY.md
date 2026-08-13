@@ -42,6 +42,17 @@ Both must be changed explicitly and are never auto-escalated by the system.
 - Portal credentials (Phase 7+) will prefer OS credential/keyring storage
   over plaintext files where the platform supports it.
 
+## PII storage
+
+- Uploaded resumes/cover letters are saved under `data/uploads/` (see
+  `UPLOAD_DIR` in `.env.example`) and the local database file lives under
+  `data/*.db` — both directories are gitignored and must never be committed.
+- The candidate profile database row stores raw resume/cover-letter text
+  directly (Section 27's `candidate_profiles` table); this is local-only
+  data by design (SQLite in dev) and is never sent anywhere except the
+  configured local LLM (Phase 6+) or a portal application form the
+  candidate explicitly submits.
+
 ## Logging
 
 - All logs are structured JSON via `structlog` (`app/core/logging.py`).

@@ -11,6 +11,9 @@ data/*.db
 data/*.sqlite
 logs/*.log
 
+# Uploaded resumes/cover letters contain candidate PII — never committed.
+data/uploads/
+
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
