@@ -1,0 +1,5 @@
+# Portal adapter registry. Empty until Phase 7 implements the first adapter.
+# Each entry maps a portal id to its adapter module and per-portal settings;
+# the supervisor never hardcodes portal names.
+
+portals: {}

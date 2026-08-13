@@ -1,0 +1,18 @@
+# Matching engine weights and thresholds (Phase 2). All values configurable,
+# never hardcoded in app/matching/*.
+
+scoring:
+  weights:
+    title: 25
+    skills: 30
+    experience: 15
+    industry: 10
+    location: 10
+    compensation: 10
+
+  thresholds:
+    priority_apply: 90
+    normal_apply: 80
+    apply_if_capacity: 75
+    human_review: 60
+    # Below human_review => reject

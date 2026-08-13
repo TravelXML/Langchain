@@ -1,0 +1,36 @@
+# Optional. Local development does not require Docker (see README: `make dev`).
+# Ollama is expected to run on the host, not in this compose file — set
+# OLLAMA_BASE_URL to reach it (e.g. http://host.docker.internal:11434).
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://job_automation:job_automation@postgres:5432/job_automation
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=job_automation
+      - POSTGRES_PASSWORD=job_automation
+      - POSTGRES_DB=job_automation
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    profiles:
+      - redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:

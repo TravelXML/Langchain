@@ -1,0 +1,39 @@
+# Candidate search & matching preferences.
+# Personal identity fields (name, contact info, work history) are extracted
+# from the resume in Phase 1 and stored separately — this file only holds
+# job-search preferences, which the UI will eventually edit directly.
+
+candidate:
+  target_positions: []
+
+  preferred_industries: []
+
+  skills:
+    primary: []
+    secondary: []
+
+  locations:
+    preferred: []
+    relocation_allowed: false
+
+  work_mode:
+    - remote
+    - hybrid
+    - onsite
+
+  compensation:
+    currency: USD
+    minimum: 0
+    preferred: 0
+
+  companies:
+    prioritize: []
+    exclude: []
+
+  keywords:
+    include: []
+    exclude: []
+
+  minimum_match_score: 75
+
+  maximum_applications_per_day: 30

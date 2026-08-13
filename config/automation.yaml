@@ -1,0 +1,20 @@
+# Automation safety defaults. dry_run and manual approval are the mandatory
+# defaults for a fresh install (see SECURITY.md).
+
+automation:
+  dry_run: true
+
+  discovery_concurrency: 3
+  application_concurrency: 1
+
+limits:
+  applications_per_day: 30
+  applications_per_company_per_day: 2
+
+approval:
+  mode: manual # manual | hybrid | automatic
+
+scheduler:
+  enabled: false
+  timezone: UTC
+  schedules: []

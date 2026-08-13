@@ -1,0 +1,16 @@
+# Local-first LLM configuration. Model name comes from the OLLAMA_MODEL
+# env var (see .env.example) — never hardcode a specific model here.
+# Consumed starting Phase 6 (app/llm/).
+
+llm:
+  provider: ollama
+  base_url: ${OLLAMA_BASE_URL}
+  model: ${OLLAMA_MODEL}
+  temperature: 0
+  timeout_seconds: 120
+
+fallback:
+  enabled: false
+  provider: openai_compatible
+  base_url: ${FALLBACK_LLM_BASE_URL}
+  model: ${FALLBACK_LLM_MODEL}

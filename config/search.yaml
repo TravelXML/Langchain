@@ -1,0 +1,13 @@
+# Job discovery / search policy. Consumed by discovery agents (Phase 3+).
+
+search:
+  enabled_portals: []
+
+  title_synonyms:
+    enabled: true
+    # Related titles widen recall; excluded titles are hard filters.
+    excluded_titles: []
+
+  discovery:
+    max_jobs_per_portal_per_run: 50
+    lookback_days: 14
