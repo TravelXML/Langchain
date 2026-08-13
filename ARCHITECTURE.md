@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes both the current (Phase 0-3) implementation and the
+This document describes both the current (Phase 0-4) implementation and the
 target architecture the project is being built toward, phase by phase. Where
 a component is not yet implemented, it is marked **(planned)**.
 
@@ -18,7 +18,7 @@ flowchart LR
     Candidate --> Dashboard
 ```
 
-## Current implementation (Phase 0-1)
+## Current implementation (Phase 0-4)
 
 ```mermaid
 flowchart TB
@@ -185,6 +185,59 @@ Deliberately deferred to later phases: resume selection, answer
 preparation, the portal apply graph, submission, and verification (Phase
 5-7); analytics (Phase 8). The diagram below shows where Phase 3 fits in
 the full target picture.
+
+### Guardrail engine (Phase 4)
+
+```mermaid
+flowchart TB
+    ScoreJobs[score_jobs] --> PolicyGuard[policy_guard]
+    PolicyGuard -->|per non-rejected job| Engine[guardrails.engine.run_guardrails]
+    AutomationYaml["config/automation.yaml\napplications_per_day / per_company"] --> Engine
+    Engine --> Checks["12 checks (policy.py)"]
+    Checks --> Precedence{"BLOCK > HUMAN_INPUT_REQUIRED > ALLOW"}
+    Precedence -->|BLOCK| Rejected[rejected_jobs]
+    Precedence -->|HUMAN_INPUT_REQUIRED| HumanReview[human_review_jobs]
+    Precedence -->|ALLOW| ScoreRouting["fall back to the scorer's\nown recommendation"]
+    ScoreRouting --> Queue[application_queue]
+    ScoreRouting --> HumanReview
+```
+
+`app/guardrails/`: `models.py` (`GuardrailDecision` — `ALLOW`/`BLOCK`/
+`HUMAN_INPUT_REQUIRED`, never a bare bool, so "blocked" and "needs a human"
+can't be conflated), `policy.py` (12 checks: `minimum_match_score`,
+`maximum_daily_applications`, `maximum_company_applications`,
+`excluded_companies`/`_roles`/`_locations`, `minimum_salary`,
+`experience_mismatch`, `required_work_authorization`,
+`duplicate_application`, `resume_validation`, `mandatory_fields`), and
+`engine.py` (orchestrates all 12, aggregates to one decision — BLOCK beats
+HUMAN_INPUT_REQUIRED beats ALLOW).
+
+**Guardrails have final say over the scorer, per Section 23** ("supervisor
+must not bypass or override guardrails") — `policy_guard` runs every
+non-rejected job through the engine after score-based routing, and a
+guardrail can only make the outcome *more* restrictive (queue →
+human_review → reject), never less. Verified live: a job scoring 91
+(`priority_apply`) from an excluded company ends up in `rejected_jobs`,
+its `reason` carrying both the original score explanation and the
+guardrail note (`app/graph/nodes.py::_with_guardrail_note`).
+
+**The concrete "never fabricate candidate information" guardrail**
+(Section 17) is `check_experience_mismatch`: if the resume parser never
+determined a number for the candidate's years of experience — Phase 1's
+`ExtractedField.source == "unextracted"` — and the job states a minimum,
+the check returns `HUMAN_INPUT_REQUIRED` rather than assuming eligibility
+either way. It's the same provenance mechanism Phase 1 built for exactly
+this purpose, not a separate new one. `required_work_authorization`
+(Section 18) follows the identical pattern: `CandidatePreferences.
+work_authorization` defaults to `None`, and stays `None` until the
+candidate explicitly states it — never inferred.
+
+No `applications`/`audit_events` tables exist yet, so
+`maximum_daily_applications`/`maximum_company_applications` and
+`duplicate_application` currently evaluate against `0`/`0`/an empty set
+(`GuardrailContext`'s defaults) — the checks are fully implemented and unit
+tested with non-trivial inputs, they just have no real history to count
+against until Phase 5+ records actual submissions.
 
 ### Target LangGraph workflow (Phase 3 done through Guard; rest planned)
 
@@ -372,3 +425,11 @@ everything directly); it exists for the optional production path.
   opens a fresh checkpointer connection to disk rather than holding one open
   for the process lifetime — proven by killing and restarting the server
   mid-run and still resuming correctly (introduced Phase 3).
+- **Guardrails can only tighten an outcome, never loosen one.** The scorer
+  proposes (Phase 2); guardrails dispose (Phase 4) — a check can downgrade
+  `priority_apply` to `reject`, but nothing downstream can upgrade a
+  guardrail's `BLOCK` back to `ALLOW` (Section 23).
+- **Unknown is a distinct outcome from allowed or blocked.**
+  `GuardrailDecision` is a three-value enum, not a bool — code can't
+  accidentally treat "needs a human" the same as "denied" or "approved"
+  (Section 17/18's fabrication-prevention rules depend on this distinction).

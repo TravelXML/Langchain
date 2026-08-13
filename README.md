@@ -25,6 +25,12 @@ requires no paid API key for the basic install.
   guard → finalize, with a real human-in-the-loop interrupt (jobs scoring in
   the `human_review` band pause the run) and SQLite-backed checkpointing so
   a run survives a process restart. Exposed via `/api/runs`.
+- **Phase 4 — Guardrails**: a deterministic policy engine (`app/guardrails/`,
+  12 checks — score floor, daily/per-company limits, excluded companies/
+  roles/locations, salary floor, experience mismatch, work authorization,
+  duplicate detection, resume/identity completeness) wired into `policy_guard`
+  with final say over the scorer — it can only make a job *more* restricted
+  (queue → human_review → reject), never less.
 
 Everything else described in the architecture doc (portal adapters, browser
 automation, dashboard, scheduler) lands in later phases.
@@ -143,17 +149,25 @@ tuned to exercise every path, including a deliberate cross-portal duplicate.
 curl -X POST http://localhost:8000/api/runs
 ```
 
-If any job's score lands in the `human_review` band (60–74), the run
-**pauses** there — the response comes back with `status: "waiting_human"`
-and the pending job(s) needing a decision:
+If any job's score lands in the `human_review` band (60–74), **or** the
+Phase 4 guardrail engine flags something a score alone can't tell you
+(unknown work authorization, an excluded company, a duplicate application,
+...), the run **pauses** — the response comes back with `status:
+"waiting_human"` and the pending job(s) needing a decision. Guardrails run
+*after* scoring and can only tighten the outcome (queue → human_review →
+reject), never loosen it — a `priority_apply`-scored job from an excluded
+company still ends up rejected. Note in particular: `work_authorization` is
+unset by default (`config/candidate.yaml`), so a fresh install will pause
+on every job until you set it — that's intentional (Section 18: never
+guessed).
 
 ```json
 {
   "run_id": "6b9e4e2c-...",
   "status": "waiting_human",
   "interrupt": {
-    "reason": "SCORE_REQUIRES_HUMAN_REVIEW",
-    "jobs": [{"job_id": "f5eafa7a-...", "title": "Head of Engineering", "company": "Gamma Systems", "score": 66.0}]
+    "reason": "HUMAN_REVIEW_REQUIRED",
+    "jobs": [{"job_id": "f5eafa7a-...", "title": "Head of Engineering", "company": "Gamma Systems", "score": 66.0, "note": "... | guardrails: candidate has not stated a work-authorization status"}]
   }
 }
 ```
@@ -220,7 +234,8 @@ app/
   graph/             LangGraph supervisor — state/nodes/graph/service,
                       mocked portals until Phase 7 (Phase 3)
   agents/            LLM-driven agent steps (Phase 6+; empty for now)
-  guardrails/        deterministic policy engine (Phase 4)
+  guardrails/        deterministic policy engine — models/policy/engine,
+                      12 checks, wired into graph/nodes.py's policy_guard (Phase 4)
   browser/           Playwright automation (Phase 5)
   portals/           portal adapters (Phase 7+)
   llm/               local LLM provider abstraction (Phase 6)
@@ -270,6 +285,26 @@ make test       # pytest
   Section 26) — an in-memory DB would be empty on every new connection.
   Tests point it at a temp file for the same reason the main app DB can use
   `:memory:` (a cached, single, StaticPool-backed engine) while this can't.
+- **`check_minimum_score` (Phase 4) deliberately skips jobs the scorer
+  already routed to `human_review`.** The candidate's personal
+  `minimum_match_score` (`config/candidate.yaml`, default 75) and the
+  scorer's own `human_review` threshold (`config/scoring.yaml`, default 60)
+  are two independent, differently-scoped numbers — without the carve-out, a
+  stricter personal minimum would silently reject a job before a human ever
+  saw it, defeating the interrupt that Phase 3 built. See
+  `app/guardrails/policy.py::check_minimum_score`'s docstring.
+- **Test fixtures for a `CandidateProfile` need `resume.email` set, not just
+  `experience_years`.** Phase 4's `check_mandatory_fields` guardrail blocks
+  any application with no email on file — realistic (a real parsed resume
+  always has one), but it silently swallowed several Phase 3 tests' human-
+  review scenarios when the fixture resume only set `experience_years`. If a
+  graph-integration test unexpectedly completes instead of pausing, check
+  the seeded resume has an email first.
+- **`CandidatePreferences.work_authorization` defaults to `None`**, and the
+  guardrail for it fires for *every* job when unset (Section 18: never
+  guessed). Test fixtures that aren't specifically testing that guardrail
+  should set it explicitly (e.g. `work_authorization="citizen"`) or every
+  job will end up in `human_review`.
 
 ## Development workflow
 

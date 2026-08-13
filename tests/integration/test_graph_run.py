@@ -12,6 +12,11 @@ from app.profile.models import CandidatePreferences, ExtractedField, ResumeExtra
 # Engineering" at Gamma Systems — lands in the human_review band. This is
 # what lets these tests exercise the interrupt/resume path deterministically
 # rather than only the happy path.
+#
+# work_authorization is set explicitly so these Phase 3 (score-routing)
+# tests aren't also exercising the Phase 4 guardrail that flags an unset
+# work_authorization as HUMAN_INPUT_REQUIRED for every job — that path has
+# its own tests in test_guardrails_graph_integration.py.
 _PREFERENCES = CandidatePreferences(
     target_positions=["CTO"],
     preferred_industries=["SaaS"],
@@ -22,6 +27,7 @@ _PREFERENCES = CandidatePreferences(
     compensation_currency="INR",
     compensation_minimum=30,
     compensation_preferred=50,
+    work_authorization="citizen",
 )
 
 
@@ -29,6 +35,7 @@ async def _seed_profile(session: AsyncSession, *, experience_years: float | None
     resume = ResumeExtraction(
         source_file="resume.pdf",
         raw_text="...",
+        email=ExtractedField[str](value="jordan@example.com", source="resume", confidence=0.95),
         experience_years=(
             ExtractedField[float](value=experience_years, source="resume", confidence=0.7)
             if experience_years is not None
@@ -55,7 +62,7 @@ async def test_run_pauses_for_human_review_then_resumes_with_queue_decision():
     started = await service.start_run()
     assert started.status == "waiting_human"
     assert started.interrupt is not None
-    assert started.interrupt["reason"] == "SCORE_REQUIRES_HUMAN_REVIEW"
+    assert started.interrupt["reason"] == "HUMAN_REVIEW_REQUIRED"
     pending_titles = [j["title"] for j in started.interrupt["jobs"]]
     assert pending_titles == ["Head of Engineering"]
 

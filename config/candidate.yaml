@@ -14,12 +14,19 @@ candidate:
 
   locations:
     preferred: []
+    excluded: []
     relocation_allowed: false
 
   work_mode:
     - remote
     - hybrid
     - onsite
+
+  # Sensitive (Section 18) — leave unset until the candidate explicitly
+  # provides it. Guardrails treat an unset value as HUMAN_INPUT_REQUIRED,
+  # never guessed. Example values: "citizen", "permanent_resident",
+  # "visa_required", "authorized_no_sponsorship".
+  work_authorization: null
 
   compensation:
     currency: USD

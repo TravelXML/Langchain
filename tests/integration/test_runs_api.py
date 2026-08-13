@@ -4,6 +4,8 @@ from app.database.models.candidate_profile import DEFAULT_PROFILE_ID, CandidateP
 from app.database.session import get_sessionmaker
 from app.profile.models import CandidatePreferences, ExtractedField, ResumeExtraction
 
+# work_authorization is set so this API-level test isn't also tripping the
+# Phase 4 guardrail that flags an unset value as needing human input.
 _PREFERENCES = CandidatePreferences(
     target_positions=["CTO"],
     preferred_industries=["SaaS"],
@@ -14,6 +16,7 @@ _PREFERENCES = CandidatePreferences(
     compensation_currency="INR",
     compensation_minimum=30,
     compensation_preferred=50,
+    work_authorization="citizen",
 )
 
 
@@ -21,6 +24,7 @@ async def _seed_profile() -> None:
     resume = ResumeExtraction(
         source_file="resume.pdf",
         raw_text="...",
+        email=ExtractedField[str](value="jordan@example.com", source="resume", confidence=0.95),
         experience_years=ExtractedField[float](value=15.0, source="resume", confidence=0.7),
     )
     async with get_sessionmaker()() as session:

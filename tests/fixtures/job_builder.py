@@ -6,7 +6,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.jobs.models import NormalizedJob
-from app.profile.models import CandidatePreferences
+from app.profile.models import (
+    CandidatePreferences,
+    CandidateProfile,
+    ExtractedField,
+    ResumeExtraction,
+)
 
 
 def make_job(**overrides: Any) -> NormalizedJob:
@@ -50,3 +55,27 @@ def make_preferences(**overrides: Any) -> CandidatePreferences:
     )
     defaults.update(overrides)
     return CandidatePreferences(**defaults)
+
+
+def make_resume(**overrides: Any) -> ResumeExtraction:
+    defaults: dict[str, Any] = dict(
+        source_file="resume.pdf",
+        raw_text="Jordan Casey Smith\njordan@example.com",
+        email=ExtractedField[str](value="jordan@example.com", source="resume", confidence=0.95),
+        experience_years=ExtractedField[float](value=15.0, source="resume", confidence=0.7),
+    )
+    defaults.update(overrides)
+    return ResumeExtraction(**defaults)
+
+
+def make_profile(**overrides: Any) -> CandidateProfile:
+    now = datetime.now(UTC)
+    defaults: dict[str, Any] = dict(
+        id="default",
+        resume=make_resume(),
+        preferences=make_preferences(),
+        created_at=now,
+        updated_at=now,
+    )
+    defaults.update(overrides)
+    return CandidateProfile(**defaults)

@@ -108,9 +108,15 @@ class CandidatePreferences(BaseModel):
     skills_secondary: list[str] = Field(default_factory=list)
 
     locations_preferred: list[str] = Field(default_factory=list)
+    locations_excluded: list[str] = Field(default_factory=list)
     relocation_allowed: bool = False
 
     work_mode: list[str] = Field(default_factory=list)
+
+    # Section 18: sensitive, never LLM-inferred — None means "not yet
+    # provided by the candidate", which guardrails treat as
+    # HUMAN_INPUT_REQUIRED rather than assuming either way.
+    work_authorization: str | None = None
 
     compensation_currency: str = "USD"
     compensation_minimum: float = 0.0
@@ -139,8 +145,10 @@ class CandidatePreferences(BaseModel):
             skills_primary=skills.get("primary", []),
             skills_secondary=skills.get("secondary", []),
             locations_preferred=locations.get("preferred", []),
+            locations_excluded=locations.get("excluded", []),
             relocation_allowed=locations.get("relocation_allowed", False),
             work_mode=c.get("work_mode", []),
+            work_authorization=c.get("work_authorization"),
             compensation_currency=compensation.get("currency", "USD"),
             compensation_minimum=compensation.get("minimum", 0.0),
             compensation_preferred=compensation.get("preferred", 0.0),

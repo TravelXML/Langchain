@@ -19,12 +19,15 @@ from app.core.logging import get_logger
 from app.database.session import get_sessionmaker
 from app.graph.mock_portals import MOCK_PORTALS
 from app.graph.state import JobAutomationState, ScoredJob
+from app.guardrails.engine import run_guardrails
+from app.guardrails.models import GuardrailContext, GuardrailDecision
 from app.jobs.models import NormalizedJob
 from app.jobs.parser import normalize_job
-from app.matching.models import load_scoring_thresholds, load_scoring_weights
+from app.matching.models import Recommendation, load_scoring_thresholds, load_scoring_weights
 from app.matching.scorer import score_job
 from app.matching.title import title_family
 from app.profile import profile_service
+from app.profile.models import CandidateProfile
 
 logger = get_logger(__name__)
 
@@ -150,23 +153,73 @@ async def score_jobs_node(state: JobAutomationState) -> dict[str, Any]:
     return {"scored_jobs": scored}
 
 
+def _with_guardrail_note(
+    scored_job: ScoredJob, note: str, recommendation: Recommendation
+) -> ScoredJob:
+    updated_match = scored_job.match.model_copy(
+        update={
+            "reason": f"{scored_job.match.reason} | guardrails: {note}",
+            "recommendation": recommendation,
+        }
+    )
+    return ScoredJob(job=scored_job.job, match=updated_match)
+
+
 async def policy_guard_node(state: JobAutomationState) -> dict[str, Any]:
+    """Score-based routing (Phase 3), then the deterministic guardrail
+    engine (Section 17/Phase 4) has final say on every non-rejected job —
+    it can only make a job *more* restricted (queue -> human_review ->
+    reject), never less, per Section 23's "supervisor must not bypass or
+    override guardrails".
+    """
     scored = state.get("scored_jobs", [])
-    rejected = [s for s in scored if s.match.recommendation == "reject"]
-    human_review = [s for s in scored if s.match.recommendation == "human_review"]
-    queue = [s for s in scored if s.match.recommendation not in ("reject", "human_review")]
+    profile: CandidateProfile | None = state.get("candidate_profile")
+
+    rejected: list[ScoredJob] = [s for s in scored if s.match.recommendation == "reject"]
+    human_review: list[ScoredJob] = []
+    queue: list[ScoredJob] = []
+
+    for scored_job in scored:
+        if scored_job.match.recommendation == "reject":
+            continue  # already in `rejected` above
+
+        if profile is None:
+            # No profile to evaluate guardrails against — fall back to
+            # score-only routing.
+            target = human_review if scored_job.match.recommendation == "human_review" else queue
+            target.append(scored_job)
+            continue
+
+        report = run_guardrails(
+            GuardrailContext(job=scored_job.job, match=scored_job.match, profile=profile)
+        )
+        if report.decision == GuardrailDecision.BLOCK:
+            rejected.append(
+                _with_guardrail_note(scored_job, "; ".join(report.blocking_reasons), "reject")
+            )
+        elif report.decision == GuardrailDecision.HUMAN_INPUT_REQUIRED:
+            human_review.append(
+                _with_guardrail_note(
+                    scored_job, "; ".join(report.human_input_reasons), "human_review"
+                )
+            )
+        elif scored_job.match.recommendation == "human_review":
+            human_review.append(scored_job)
+        else:
+            queue.append(scored_job)
 
     if human_review:
         decision: dict[str, str] = (
             interrupt(
                 {
-                    "reason": "SCORE_REQUIRES_HUMAN_REVIEW",
+                    "reason": "HUMAN_REVIEW_REQUIRED",
                     "jobs": [
                         {
                             "job_id": s.job.id,
                             "title": s.job.title,
                             "company": s.job.company,
                             "score": s.match.overall_score,
+                            "note": s.match.reason,
                         }
                         for s in human_review
                     ],
@@ -190,7 +243,7 @@ async def policy_guard_node(state: JobAutomationState) -> dict[str, Any]:
         "application_queue": queue,
         "human_review_jobs": human_review,
         "human_action_required": bool(human_review),
-        "human_action_reason": "SCORE_REQUIRES_HUMAN_REVIEW" if human_review else None,
+        "human_action_reason": "HUMAN_REVIEW_REQUIRED" if human_review else None,
     }
 
 
