@@ -31,9 +31,17 @@ requires no paid API key for the basic install.
   duplicate detection, resume/identity completeness) wired into `policy_guard`
   with final say over the scorer — it can only make a job *more* restricted
   (queue → human_review → reject), never less.
+- **Phase 5 — Playwright Form Engine**: real browser automation
+  (`app/browser/`) against **local HTML fixtures only** — field detection
+  (single DOM-walk JS scan), a deterministic (non-LLM) field-to-candidate
+  mapping with an honest `requires_human` flag, filling (text/select/
+  checkbox/file upload), HTML5 validation, multi-step navigation, and
+  screenshot + HTML-snapshot capture on failure. Not wired to any real
+  portal yet (Phase 7) or to CAPTCHA/OTP pause logic yet (Phase 6) —
+  those fixture pages exist now but nothing reacts to them until then.
 
-Everything else described in the architecture doc (portal adapters, browser
-automation, dashboard, scheduler) lands in later phases.
+Everything else described in the architecture doc (portal adapters, human
+interrupt beyond scoring, dashboard, scheduler) lands in later phases.
 
 ## Quickstart
 
@@ -45,7 +53,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 pip install -e ".[dev]"
-playwright install chromium   # only needed once browser automation phases land
+playwright install chromium   # required from Phase 5 on (app/browser/, e2e tests)
 
 cp .env.example .env
 alembic upgrade head          # creates ./data/job_automation.db with the current schema
@@ -186,6 +194,46 @@ the pause and the resume and starting a fresh process still resumes
 correctly (verified manually; see `app/graph/graph.py`'s docstring). Check
 status any time with `GET /api/runs/<run_id>`.
 
+### Trying the form engine
+
+Not wired into the API yet (that happens when Phase 7 gives it a real
+portal, and Phase 6 gives it CAPTCHA/OTP pause logic) — today it's a
+library you drive directly against the local fixture pages under
+`tests/fixtures/html/`:
+
+```python
+import asyncio
+from pathlib import Path
+
+from app.browser.manager import launch_browser
+from app.browser.forms import detect_fields, fill_form, validate_form
+from app.browser.mapping import map_fields
+from app.profile.models import CandidateProfile  # ... build or load one
+
+async def main():
+    profile = ...  # e.g. app.profile.profile_service.get_profile(session)
+    fixture = Path("tests/fixtures/html/simple_application_form.html").resolve()
+
+    async with launch_browser() as browser:
+        page = await browser.new_page()
+        await page.goto(f"file://{fixture}")
+
+        fields = await detect_fields(page)
+        mappings = map_fields(fields, profile)   # each has candidate_value/confidence/requires_human
+        result = await fill_form(page, fields, mappings)
+        print("filled:", result.filled, "needs a human:", result.skipped_for_human)
+
+        assert await validate_form(page) == []   # no missing required fields
+        await page.click('[data-testid="submit-button"]')
+
+asyncio.run(main())
+```
+
+A field the mapper isn't confident about (or has no known pattern for —
+see the sensitive categories in `app/browser/mapping.py`) is never guessed:
+it comes back with `candidate_value=None, requires_human=True` and
+`fill_form` leaves it untouched rather than filling something wrong.
+
 ## Local LLM setup (Ollama)
 
 The platform defaults to a local Ollama instance and never requires a paid
@@ -236,7 +284,8 @@ app/
   agents/            LLM-driven agent steps (Phase 6+; empty for now)
   guardrails/        deterministic policy engine — models/policy/engine,
                       12 checks, wired into graph/nodes.py's policy_guard (Phase 4)
-  browser/           Playwright automation (Phase 5)
+  browser/           Playwright automation — manager/sessions/selectors/
+                      forms/mapping/screenshots/errors (Phase 5)
   portals/           portal adapters (Phase 7+)
   llm/               local LLM provider abstraction (Phase 6)
   observability/ notifications/ scheduler/ security/
@@ -305,6 +354,14 @@ make test       # pytest
   guessed). Test fixtures that aren't specifically testing that guardrail
   should set it explicitly (e.g. `work_authorization="citizen"`) or every
   job will end up in `human_review`.
+- **Playwright's `select_option(label=...)` requires an exact string
+  match, including case.** `config/candidate.yaml` stores `work_mode`
+  lowercase (`remote`); a real portal's `<option>` text is often
+  capitalized (`Remote`). `app/browser/forms.py::_select_option_case_insensitive`
+  retries with a case-insensitive lookup before giving up — if you add
+  another `<select>`-handling path, route it through that helper rather
+  than calling `select_option` directly, or a confidently-mapped field
+  will fail to fill over nothing but casing.
 
 ## Development workflow
 

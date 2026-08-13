@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Verify Your Identity</title>
+</head>
+<body>
+  <!-- Fixture only — Phase 6 wires OTP detection/interrupt against this. -->
+  <h1>Verify Your Identity</h1>
+  <p>We sent a 6-digit code to your registered phone number.</p>
+  <form id="otp-form" data-testid="otp-form">
+    <label for="otp-code">One-Time Passcode</label>
+    <input
+      type="text"
+      id="otp-code"
+      name="otp_code"
+      data-testid="otp-input"
+      inputmode="numeric"
+      pattern="[0-9]{6}"
+      maxlength="6"
+      required
+    />
+    <button type="submit" data-testid="verify-button">Verify</button>
+  </form>
+</body>
+</html>

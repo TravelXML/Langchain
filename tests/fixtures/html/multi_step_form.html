@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Multi-Step Application Form</title>
+</head>
+<body>
+  <h1>Apply for VP Engineering</h1>
+
+  <section id="step-1" data-testid="step-1">
+    <h2>Step 1: Contact Info</h2>
+    <label for="full-name">Full Name</label>
+    <input type="text" id="full-name" name="full_name" data-testid="full-name-input" />
+
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" data-testid="email-input" />
+
+    <button type="button" data-testid="next-button">Next</button>
+  </section>
+
+  <section id="step-2" data-testid="step-2" hidden>
+    <h2>Step 2: Experience</h2>
+    <label for="current-title">Current Title</label>
+    <input type="text" id="current-title" name="current_title" data-testid="current-title-input" />
+
+    <label for="experience">Years of Experience</label>
+    <input type="number" id="experience" name="experience_years" data-testid="experience-input" />
+
+    <button type="button" data-testid="back-button">Back</button>
+    <button type="submit" data-testid="submit-button" form="step-2-form">Submit</button>
+  </section>
+
+  <div id="result" hidden data-testid="result">Application received.</div>
+
+  <script>
+    const step1 = document.getElementById('step-1');
+    const step2 = document.getElementById('step-2');
+    const result = document.getElementById('result');
+
+    document.querySelector('[data-testid="next-button"]').addEventListener('click', () => {
+      step1.hidden = true;
+      step2.hidden = false;
+    });
+    document.querySelector('[data-testid="back-button"]').addEventListener('click', () => {
+      step2.hidden = true;
+      step1.hidden = false;
+    });
+    document.querySelector('[data-testid="submit-button"]').addEventListener('click', (e) => {
+      e.preventDefault();
+      step2.hidden = true;
+      result.hidden = false;
+    });
+  </script>
+</body>
+</html>

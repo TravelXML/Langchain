@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Resume Upload Form</title>
+</head>
+<body>
+  <h1>Apply for CTO</h1>
+  <form id="application-form">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" data-testid="email-input" />
+
+    <label for="resume">Resume</label>
+    <input type="file" id="resume" name="resume" data-testid="resume-input" accept=".pdf" />
+
+    <button type="submit" data-testid="submit-button">Submit Application</button>
+  </form>
+  <div id="result" hidden data-testid="result"></div>
+
+  <script>
+    document.getElementById('application-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fileInput = document.getElementById('resume');
+      const result = document.getElementById('result');
+      if (fileInput.files.length > 0) {
+        result.textContent = 'Application received with resume: ' + fileInput.files[0].name;
+      } else {
+        result.textContent = 'Application received without a resume.';
+      }
+      document.getElementById('application-form').hidden = true;
+      result.hidden = false;
+    });
+  </script>
+</body>
+</html>

@@ -18,9 +18,12 @@ The system will **never**:
 - Submit an application outside of `dry_run: false` + an explicit approval
   decision under the configured `approval.mode`.
 
-If a CAPTCHA or OTP/MFA challenge is encountered (Phase 5+), the run pauses,
-persists state, and waits for manual completion — it is never worked around
-programmatically.
+If a CAPTCHA or OTP/MFA challenge is encountered, the run pauses, persists
+state, and waits for manual completion — it is never worked around
+programmatically. (Phase 5 built the CAPTCHA/OTP fixture pages used to test
+this; the detection + pause wiring itself is Phase 6's "Human Interrupt"
+phase — Phase 3 already proved the same pause/persist/resume mechanism
+works, for the unrelated case of a job needing human score review.)
 
 ## Defaults
 
@@ -52,6 +55,12 @@ Both must be changed explicitly and are never auto-escalated by the system.
   data by design (SQLite in dev) and is never sent anywhere except the
   configured local LLM (Phase 6+) or a portal application form the
   candidate explicitly submits.
+- Browser session cookies/local storage (`BROWSER_SESSIONS_DIR`, per-portal
+  under `data/browser_sessions/`) and failure screenshots/HTML snapshots
+  (`BROWSER_ARTIFACTS_DIR`, `data/browser_artifacts/`) can both contain PII
+  or live session tokens — both directories are gitignored. Screenshots are
+  only ever taken of pages the candidate's own automation is already
+  interacting with, never sent anywhere off the local machine.
 
 ## Logging
 

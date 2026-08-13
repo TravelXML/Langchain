@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Security Check</title>
+</head>
+<body>
+  <!-- Fixture only — Phase 6 wires CAPTCHA detection/interrupt against
+       this. Section 12 prohibits solving/bypassing CAPTCHAs; the system
+       must pause and wait for a human, never attempt this widget. -->
+  <h1>Security Check</h1>
+  <div class="captcha-widget" data-testid="captcha-widget">
+    <label>
+      <input type="checkbox" id="captcha-checkbox" data-testid="captcha-checkbox" />
+      I'm not a robot
+    </label>
+  </div>
+  <button type="button" data-testid="continue-button" disabled>Continue</button>
+</body>
+</html>

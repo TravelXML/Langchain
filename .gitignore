@@ -14,6 +14,11 @@ logs/*.log
 # Uploaded resumes/cover letters contain candidate PII — never committed.
 data/uploads/
 
+# Browser session cookies and failure screenshots/HTML can contain PII or
+# session tokens — never committed.
+data/browser_sessions/
+data/browser_artifacts/
+
 # Source master prompt — was previously leaked into a commit and scrubbed
 # from history (2026-08-13); this guards against it recurring.
 /prompt/

@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes both the current (Phase 0-4) implementation and the
+This document describes both the current (Phase 0-5) implementation and the
 target architecture the project is being built toward, phase by phase. Where
 a component is not yet implemented, it is marked **(planned)**.
 
@@ -18,7 +18,7 @@ flowchart LR
     Candidate --> Dashboard
 ```
 
-## Current implementation (Phase 0-4)
+## Current implementation (Phase 0-5)
 
 ```mermaid
 flowchart TB
@@ -237,7 +237,70 @@ No `applications`/`audit_events` tables exist yet, so
 `duplicate_application` currently evaluate against `0`/`0`/an empty set
 (`GuardrailContext`'s defaults) — the checks are fully implemented and unit
 tested with non-trivial inputs, they just have no real history to count
-against until Phase 5+ records actual submissions.
+against until Phase 7+ records actual submissions.
+
+### Playwright form engine (Phase 5)
+
+```mermaid
+flowchart TB
+    Page[Playwright Page] --> Detect[forms.detect_fields\none page.evaluate DOM walk]
+    Detect --> Fields["list[DetectedField]\n(label, type, options, required, selector)"]
+    Fields --> Mapping[mapping.map_fields]
+    Profile[CandidateProfile] --> Mapping
+    Mapping --> Mappings["list[FieldMapping]\n(candidate_value, confidence, requires_human, reason)"]
+    Mappings --> Fill[forms.fill_form]
+    Fields --> Fill
+    Fill --> Filled[fields actually filled]
+    Fill --> SkippedForHuman[fields left for a human]
+    Fill --> Validate[forms.validate_form\nHTML5 checkValidity]
+    Detect -.on failure.-> Screenshots[screenshots.capture_failure_artifacts\nPNG + HTML + console logs]
+```
+
+`app/browser/`: `manager.py` (launches/closes Chromium, headless
+configurable), `sessions.py` (one persistent `BrowserContext` per portal,
+cookies/storage saved to `data/browser_sessions/<portal>.json` so logging
+in once doesn't mean logging in again next run), `selectors.py`
+(`build_selector` — the priority order from Section 11: data-testid >
+aria-label > role > name > id > CSS > text, pure function, no browser
+needed to unit test it), `forms.py` (detect/fill/validate/upload, all
+Playwright-dependent), `mapping.py` (the rule-based field-intelligence
+module, Playwright-independent — pure function over `DetectedField` +
+`CandidateProfile`), `screenshots.py`, `errors.py`, `models.py`
+(`DetectedField`, `FieldMapping`, `FormFillResult`).
+
+**Deterministic, not LLM-based — same reasoning as every prior phase.**
+Phase 5 has no LLM yet (Phase 6); `mapping.py`'s keyword-pattern table
+handles label→field recognition, exactly the kind of task Section 2 says
+shouldn't wait for one. A future LLM-backed classifier (Phase 6) can
+replace the matching logic without changing `FieldMapping`'s shape or any
+caller — same swap-without-breaking-callers pattern as `semantic.py` in
+Phase 2.
+
+**Confidence and "requires human" are never conflated with the field
+simply having no known pattern.** Section 20's exact output shape
+(`field`, `candidate_value`, `confidence`, `requires_human`) is
+`FieldMapping`. Below `FORM_MAPPING_CONFIDENCE_THRESHOLD` (default 0.7,
+`config` via `.env`) a field is never auto-filled even if a value exists —
+verified live: an 18-year-experience, no-name-on-file candidate profile
+run against the simple fixture form correctly filled email/phone/experience
+and left `full_name` for a human, with the reason spelled out
+(`"recognized as 'name' but no value is on file"`).
+
+**Section 18's sensitive categories have no representation in the
+candidate model at all** — gender, ethnicity, disability, veteran status,
+religion, security clearance, criminal history always resolve to
+`requires_human=True` in `mapping.py`, not because confidence is low but
+because there is structurally nothing to guess from.
+
+**Fixtures, not production portals** (Section 42): `tests/fixtures/html/`
+has all ten required scenarios — simple form, multi-step, dropdown,
+resume upload, required fields, an unrecognized field, OTP screen, CAPTCHA
+screen, success page, failure page. The OTP/CAPTCHA/success/failure pages
+are fixtures only for now; nothing detects or reacts to them yet — that
+wiring is Phase 6 (interrupt logic) and Phase 7 (submission verification)
+respectively. All 11 e2e tests in `tests/e2e/test_form_engine.py` run
+against a real headless Chromium instance via `file://` URLs, no server
+required.
 
 ### Target LangGraph workflow (Phase 3 done through Guard; rest planned)
 
@@ -433,3 +496,8 @@ everything directly); it exists for the optional production path.
   `GuardrailDecision` is a three-value enum, not a bool — code can't
   accidentally treat "needs a human" the same as "denied" or "approved"
   (Section 17/18's fabrication-prevention rules depend on this distinction).
+- **No feature develops against a live external site as its test
+  environment.** Job discovery uses mock portals (Phase 3); the form
+  engine uses local HTML fixtures (Phase 5, Section 42). Both are
+  real code exercised by real automation (a real headless browser, a
+  real LangGraph run) — only the *target* is local and disposable.

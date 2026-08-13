@@ -62,6 +62,20 @@ class Settings(BaseSettings):
         default="./data/langgraph_checkpoints.db", alias="LANGGRAPH_CHECKPOINT_PATH"
     )
 
+    browser_headless: bool = Field(default=True, alias="BROWSER_HEADLESS")
+    browser_sessions_dir: Path = Field(
+        default=Path("./data/browser_sessions"), alias="BROWSER_SESSIONS_DIR"
+    )
+    browser_artifacts_dir: Path = Field(
+        default=Path("./data/browser_artifacts"), alias="BROWSER_ARTIFACTS_DIR"
+    )
+    browser_default_timeout_ms: int = Field(default=10_000, alias="BROWSER_DEFAULT_TIMEOUT_MS")
+    # Section 20: below this, a field mapping is never auto-filled — the
+    # form engine requests human input instead of guessing.
+    form_mapping_confidence_threshold: float = Field(
+        default=0.7, alias="FORM_MAPPING_CONFIDENCE_THRESHOLD"
+    )
+
 
 @functools.lru_cache
 def get_settings() -> Settings:

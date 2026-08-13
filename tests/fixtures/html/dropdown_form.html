@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Dropdown Application Form</title>
+</head>
+<body>
+  <h1>Apply for Head of Engineering</h1>
+  <form id="application-form">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" data-testid="email-input" />
+
+    <label for="work-mode">Preferred Work Mode</label>
+    <select id="work-mode" name="work_mode" data-testid="work-mode-select">
+      <option value="">Select one</option>
+      <option value="remote">Remote</option>
+      <option value="hybrid">Hybrid</option>
+      <option value="onsite">Onsite</option>
+    </select>
+
+    <button type="submit" data-testid="submit-button">Submit Application</button>
+  </form>
+  <div id="result" hidden data-testid="result">Application received.</div>
+
+  <script>
+    document.getElementById('application-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      document.getElementById('application-form').hidden = true;
+      document.getElementById('result').hidden = false;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Form With An Unrecognized Field</title>
+</head>
+<body>
+  <h1>Apply for Technology Director</h1>
+  <form id="application-form">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" data-testid="email-input" />
+
+    <!-- No pattern in app/browser/mapping.py recognizes this label on
+         purpose — this fixture exists to prove requires_human=True fires
+         for genuinely unknown fields instead of guessing. -->
+    <label for="fav-language">What is your favorite programming language?</label>
+    <input type="text" id="fav-language" name="fav_language" data-testid="fav-language-input" />
+
+    <button type="submit" data-testid="submit-button">Submit Application</button>
+  </form>
+  <div id="result" hidden data-testid="result">Application received.</div>
+
+  <script>
+    document.getElementById('application-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      document.getElementById('application-form').hidden = true;
+      document.getElementById('result').hidden = false;
+    });
+  </script>
+</body>
+</html>
