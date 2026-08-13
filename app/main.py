@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes import health, profile
+from app.api.routes import health, profile, runs
 from app.core.config import get_settings
 from app.core.logging import bind_correlation_id, clear_context, configure_logging, get_logger
 
@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(profile.router)
+    app.include_router(runs.router)
 
     return app
 

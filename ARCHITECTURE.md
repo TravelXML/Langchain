@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes both the current (Phase 0-2) implementation and the
+This document describes both the current (Phase 0-3) implementation and the
 target architecture the project is being built toward, phase by phase. Where
 a component is not yet implemented, it is marked **(planned)**.
 
@@ -137,12 +137,56 @@ recommendation thresholds (`priority_apply` ≥90, `normal_apply` ≥80,
 `NormalizedJob` (`app/jobs/models.py`) is the common schema every portal
 adapter will normalize into (Phase 7+); portal-specific fields go under
 `metadata` rather than contaminating the shared model (Section 8). No
-`jobs`/`job_scores` database tables exist yet — Phase 2 is a pure scoring
-library, exercised directly in tests and the README example; persistence
-arrives with the LangGraph pipeline in Phase 3, which is what actually
-discovers and needs to store jobs.
+`jobs`/`job_scores` database tables exist — Phase 3 persists run state via
+the LangGraph checkpointer (below) rather than dedicated SQL tables; a
+`jobs` table arrives if/when something other than a single in-flight run
+needs to query historical jobs (e.g. the Phase 8 dashboard).
 
-## Target LangGraph workflow (planned, Phase 3+)
+### LangGraph supervisor (Phase 3)
+
+```mermaid
+flowchart TB
+    START --> LoadProfile[load_candidate_profile]
+    LoadProfile --> LoadPolicy[load_search_policy]
+    LoadPolicy -->|Send: one per enabled portal| DiscoverA[discover_portal: mock_greenhouse]
+    LoadPolicy -->|Send| DiscoverB[discover_portal: mock_lever]
+    DiscoverA --> Normalize[normalize_jobs]
+    DiscoverB --> Normalize
+    Normalize --> Dedupe[dedupe_jobs]
+    Dedupe --> Score[score_jobs]
+    Score --> Guard[policy_guard]
+    Guard -->|human_review jobs exist| Interrupt["interrupt()\npersist + pause"]
+    Interrupt -.->|Command resume, later call| Guard
+    Guard --> Finalize[finalize]
+    Finalize --> END
+```
+
+Implemented in `app/graph/`: `state.py` (`JobAutomationState`, a `TypedDict`
+with `Annotated[list, operator.add]` reducers so parallel portal nodes
+accumulate into `discovered_jobs` without clobbering each other — Section
+24's fan-out, done via LangGraph's `Send` API rather than manual
+asyncio.gather), `nodes.py`, `mock_portals.py` (two fixture portals
+standing in for Phase 7's real adapters — one deliberately shares a job
+with the other, company/title-family/location-identical, to exercise cross-
+portal dedupe), `graph.py` (wiring + the SQLite checkpointer), and
+`service.py` (`start_run`/`resume_run`/`get_run_state`, backing
+`/api/runs`).
+
+**The interrupt is real, not a stub**: `policy_guard` calls LangGraph's
+`interrupt()` when any job scores in the `human_review` band (60–74).
+Everything before that call re-runs identically on resume (it's pure/
+deterministic), then the call returns the human's decision instead of
+pausing again. Verified manually end-to-end including a genuine process
+restart between pause and resume (kill the server, start a new one, `POST
+/api/runs/{id}/resume` still works) — see the README's
+"Running a discovery pipeline" section.
+
+Deliberately deferred to later phases: resume selection, answer
+preparation, the portal apply graph, submission, and verification (Phase
+5-7); analytics (Phase 8). The diagram below shows where Phase 3 fits in
+the full target picture.
+
+### Target LangGraph workflow (Phase 3 done through Guard; rest planned)
 
 ```mermaid
 flowchart TB
@@ -160,19 +204,25 @@ flowchart TB
     Normalize --> Score[Score Jobs]
     Score --> Guard[Policy Guard]
     Guard --> Queue[Application Queue]
-    Queue --> ResumeSel[Resume Selection]
-    ResumeSel --> Answers[Answer Preparation]
-    Answers --> ApplyGraph[Portal Apply Graph]
-    ApplyGraph --> Validator[Pre-Submit Validator]
-    Validator --> Auto{Automatic Approval?}
-    Auto -->|yes| Submit
-    Auto -->|no| Human[Human Review]
-    Human --> Submit
-    Submit --> Verify[Verify Submission]
-    Verify --> Persist[Persist Results]
-    Persist --> Analytics
-    Analytics --> END
+    Queue -.->|planned, Phase 5+| ResumeSel[Resume Selection]
+    ResumeSel -.-> Answers[Answer Preparation]
+    Answers -.-> ApplyGraph[Portal Apply Graph]
+    ApplyGraph -.-> Validator[Pre-Submit Validator]
+    Validator -.-> Auto{Automatic Approval?}
+    Auto -.->|yes| Submit
+    Auto -.->|no| Human[Human Review]
+    Human -.-> Submit
+    Submit -.-> Verify[Verify Submission]
+    Verify -.-> Persist[Persist Results]
+    Persist -.-> Analytics
+    Analytics -.-> END
 ```
+
+Note: implemented dedupe runs *after* normalize (needs title-family
+canonicalization — Section 14's own "normalized title" matching key),
+whereas this narrative diagram (carried over from the original design spec)
+shows it before. See `app/graph/nodes.py::dedupe_jobs_node` for the
+reasoning.
 
 ## Target portal subgraph (planned, Phase 7+)
 
@@ -226,19 +276,27 @@ stateDiagram-v2
     VERIFIED --> [*]
 ```
 
-## Target human-in-the-loop flow (planned)
+## Human-in-the-loop flow
+
+One real instance of this pattern exists today (Phase 3): a job scoring in
+the `human_review` band pauses the run via LangGraph's `interrupt()`. The
+rest — CAPTCHA, OTP, unknown-field, low-confidence-mapping interrupts, and
+a dedicated `/api/human-actions` review queue — are Phase 5/6+, once there's
+a browser/form layer and portal-specific unknowns to interrupt for. The
+mechanism (persist → notify → resolve → resume) is identical; only the
+*reasons* and the API surface expand.
 
 ```mermaid
 sequenceDiagram
     participant Graph as LangGraph run
-    participant State as Persisted state
+    participant State as Checkpointer (SQLite)
     participant User as Candidate
-    Graph->>Graph: encounter CAPTCHA / OTP / unknown field / low-confidence mapping
-    Graph->>State: persist state + reason + screenshot
-    Graph-->>User: notify (human_action_required)
-    User->>State: resolve via POST /api/human-actions/{id}/resolve
-    State-->>Graph: resume with provided answer
-    Graph->>Graph: continue from checkpoint
+    Graph->>Graph: score_jobs / policy_guard: job in human_review band (today)<br/>or CAPTCHA / OTP / unknown field (planned, Phase 5/6+)
+    Graph->>State: interrupt() persists state + reason automatically
+    Graph-->>User: response carries status: "waiting_human" + reason
+    User->>State: resolve via POST /api/runs/{id}/resume (today)<br/>or /api/human-actions/{id}/resolve (planned)
+    State-->>Graph: Command(resume=decision)
+    Graph->>Graph: continue from the exact interrupt() call site
 ```
 
 ## Database relationships (planned, expanded per phase)
@@ -306,3 +364,11 @@ everything directly); it exists for the optional production path.
 - **Dry-run and manual approval by default.** See `SECURITY.md`.
 - **No portal-specific fields leak into the common job model** — they live
   under `NormalizedJob.metadata` (introduced Phase 2).
+- **The supervisor orchestrates; it doesn't do the work.** `app/graph/graph.py`
+  only wires nodes/edges/fan-out — DB access, scoring, and policy decisions
+  are plain functions in `nodes.py` that the supervisor calls, never inline
+  logic in the graph definition itself (Section 23).
+- **A run's state is never only in Python memory.** Every graph invocation
+  opens a fresh checkpointer connection to disk rather than holding one open
+  for the process lifetime — proven by killing and restarting the server
+  mid-run and still resuming correctly (introduced Phase 3).

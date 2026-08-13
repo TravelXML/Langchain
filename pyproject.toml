@@ -23,6 +23,7 @@ dependencies = [
   "structlog>=24.1",
   "tenacity>=8.3",
   "langgraph>=0.1",
+  "langgraph-checkpoint-sqlite>=2.0",
   "langchain-core>=0.2",
   "playwright>=1.44",
   "pypdf>=4.2",

@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     config_dir: Path = Field(default=Path("./config"), alias="CONFIG_DIR")
     upload_dir: Path = Field(default=Path("./data/uploads"), alias="UPLOAD_DIR")
 
+    # LangGraph checkpoint storage is deliberately separate from the main
+    # application database — it's graph-execution state, not domain data.
+    langgraph_checkpoint_path: str = Field(
+        default="./data/langgraph_checkpoints.db", alias="LANGGRAPH_CHECKPOINT_PATH"
+    )
+
 
 @functools.lru_cache
 def get_settings() -> Settings:

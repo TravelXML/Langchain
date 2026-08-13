@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 
 # Must be set before any app module reads Settings, so tests never touch a
 # developer's real ./data/job_automation.db or ./data/uploads.
@@ -9,6 +10,14 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("CONFIG_DIR", "./config")
 os.environ.setdefault("AUTOMATION_DRY_RUN", "true")
 os.environ.setdefault("UPLOAD_DIR", tempfile.mkdtemp(prefix="job_automation_test_uploads_"))
+# A real file, not ":memory:" — app.graph.graph.compiled_graph() opens a
+# fresh sqlite connection per call to prove state persists across "process
+# restarts" (Section 26); an in-memory DB would lose everything between
+# calls since each connection would be its own empty database.
+os.environ.setdefault(
+    "LANGGRAPH_CHECKPOINT_PATH",
+    str(Path(tempfile.mkdtemp(prefix="job_automation_test_checkpoints_")) / "checkpoints.db"),
+)
 
 import pytest  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
