@@ -14,6 +14,10 @@ logs/*.log
 # Uploaded resumes/cover letters contain candidate PII — never committed.
 data/uploads/
 
+# Source master prompt — was previously leaked into a commit and scrubbed
+# from history (2026-08-13); this guards against it recurring.
+/prompt/
+
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
