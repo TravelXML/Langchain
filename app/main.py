@@ -5,11 +5,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import applications, health, profile, runs
+from app.api.routes import analytics, applications, health, human_actions, jobs, profile, runs
+from app.api.routes import settings as settings_routes
 from app.core.config import get_settings
 from app.core.logging import bind_correlation_id, clear_context, configure_logging, get_logger
+from app.llm.health import check_llm_health
+from app.scheduler.service import get_scheduler_service
 
 logger = get_logger(__name__)
 
@@ -24,7 +28,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         dry_run=settings.automation_dry_run,
         approval_mode=settings.approval_mode,
     )
+
+    # Section 36: never let an unreachable/misconfigured LLM stop the app
+    # from serving everything else — every route in this app works with
+    # zero LLM dependency today, so a failed check here is logged and
+    # nothing more.
+    try:
+        llm_status = await check_llm_health(
+            base_url=settings.ollama_base_url, model=settings.ollama_model
+        )
+        logger.info("llm_health_check", **llm_status.model_dump())
+    except Exception as exc:  # defense in depth: this must never abort startup
+        logger.warning("llm_health_check_failed_unexpectedly", error=str(exc))
+
+    scheduler = get_scheduler_service()
+    scheduler.start()
     yield
+    scheduler.shutdown()
     logger.info("app_shutdown")
 
 
@@ -34,6 +54,13 @@ def create_app() -> FastAPI:
         description="Local-first multi-agent job discovery, matching, and application automation.",
         version="0.1.0",
         lifespan=lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     @app.middleware("http")
@@ -56,6 +83,10 @@ def create_app() -> FastAPI:
     app.include_router(profile.router)
     app.include_router(runs.router)
     app.include_router(applications.router)
+    app.include_router(jobs.router)
+    app.include_router(human_actions.router)
+    app.include_router(analytics.router)
+    app.include_router(settings_routes.router)
 
     return app
 

@@ -3,4 +3,8 @@
 # planned schema. Each model module must be imported here so its table is
 # registered on Base.metadata for Alembic autogenerate and test setup.
 
+from app.database.models.application import ApplicationRecord  # noqa: F401
+from app.database.models.automation_run import AutomationRunRecord  # noqa: F401
 from app.database.models.candidate_profile import CandidateProfileRecord  # noqa: F401
+from app.database.models.human_intervention import HumanInterventionRecord  # noqa: F401
+from app.database.models.job import JobRecord  # noqa: F401

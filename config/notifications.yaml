@@ -1,0 +1,26 @@
+# Notification channels (Phase 9, Section 35). Console is the only
+# channel enabled by default — it requires no setup and no external
+# service, consistent with "no paid API key required for the basic
+# install." Every other channel is opt-in.
+
+notifications:
+  providers:
+    console:
+      enabled: true
+
+    webhook:
+      enabled: false
+      url: ""
+
+    email:
+      enabled: false
+      smtp_host: ""
+      smtp_port: 587
+      smtp_username: ""
+      smtp_password: "${NOTIFICATIONS_SMTP_PASSWORD}"
+      from_address: ""
+      to_address: ""
+      use_tls: true
+
+    desktop:
+      enabled: false

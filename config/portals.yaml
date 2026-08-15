@@ -1,5 +1,17 @@
-# Portal adapter registry. Empty until Phase 7 implements the first adapter.
-# Each entry maps a portal id to its adapter module and per-portal settings;
-# the supervisor never hardcodes portal names.
+# Portal adapter registry (Phase 7: Greenhouse; Phase 10: Lever). Each
+# section lists real-portal identifiers via its own public API — no
+# scraping, no auth needed for either. The supervisor never hardcodes
+# portal names; it reads this file through app/portals/registry.py.
+#
+# Every identifier list ships empty so a fresh install's discovery graph
+# only ever touches the local mock portals (app/graph/mock_portals.py) —
+# add real identifiers here to enable live discovery against them.
 
-portals: {}
+portals:
+  greenhouse:
+    # e.g. "gitlab" for https://job-boards.greenhouse.io/gitlab
+    boards: []
+
+  lever:
+    # e.g. "leverdemo" for https://jobs.lever.co/leverdemo
+    companies: []

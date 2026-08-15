@@ -15,6 +15,7 @@ from typing import Any
 from langgraph.types import interrupt
 
 from app.core.config import get_yaml_config_loader
+from app.core.errors import JobAutomationError
 from app.core.logging import get_logger
 from app.database.session import get_sessionmaker
 from app.graph.mock_portals import MOCK_PORTALS
@@ -26,6 +27,7 @@ from app.jobs.parser import normalize_job
 from app.matching.models import Recommendation, load_scoring_thresholds, load_scoring_weights
 from app.matching.scorer import score_job
 from app.matching.title import title_family
+from app.portals.registry import build_adapter, resolve_enabled_real_portals
 from app.profile import profile_service
 from app.profile.models import CandidateProfile
 
@@ -47,33 +49,62 @@ async def load_candidate_profile_node(state: JobAutomationState) -> dict[str, An
 
 async def load_search_policy_node(state: JobAutomationState) -> dict[str, Any]:
     search_policy = get_yaml_config_loader().load("search")
+    portals_config = get_yaml_config_loader().load("portals")
 
     enabled = search_policy.get("search", {}).get("enabled_portals") or []
     if not enabled:
-        # config/search.yaml ships with an empty portal list until Phase 7
-        # adds real adapters; fall back to every known mock portal so the
-        # graph has something to demonstrate discovery with.
-        enabled = list(MOCK_PORTALS.keys())
+        real_portals = resolve_enabled_real_portals(portals_config)
+        if real_portals:
+            # At least one real portal is configured — prefer it over the
+            # mock demo portals (every config/portals.yaml section ships
+            # with an empty identifier list, so a fresh install never
+            # hits this branch unedited).
+            enabled = real_portals
+        else:
+            # Nothing real configured yet; fall back to the local mock
+            # portals so the graph has something to demonstrate with.
+            enabled = list(MOCK_PORTALS.keys())
 
     return {"search_policy": search_policy, "enabled_portals": enabled}
 
 
 async def discover_portal_node(state: JobAutomationState) -> dict[str, Any]:
     portal = state["current_portal"]
-    discover_fn = MOCK_PORTALS.get(portal) if portal else None
 
-    if discover_fn is None:
-        return {"warnings": [f"Unknown or unconfigured portal: {portal}"]}
+    if portal and portal in MOCK_PORTALS:
+        try:
+            raw_jobs = MOCK_PORTALS[portal](state.get("search_policy", {}))
+        except Exception as exc:  # a portal failure must not abort the whole run
+            logger.warning("portal_discovery_failed", portal=portal, error=str(exc))
+            return {"errors": [{"portal": portal, "error": str(exc)}]}
+        for raw in raw_jobs:
+            raw["_source"] = portal
+        return {"discovered_jobs": raw_jobs}
 
-    try:
-        raw_jobs = discover_fn(state.get("search_policy", {}))
-    except Exception as exc:  # a portal failure must not abort the whole run
-        logger.warning("portal_discovery_failed", portal=portal, error=str(exc))
-        return {"errors": [{"portal": portal, "error": str(exc)}]}
+    adapter = build_adapter(portal) if portal else None
+    if adapter is not None:
+        try:
+            raw_jobs = await adapter.discover_jobs(state.get("search_policy", {}))
+        except JobAutomationError as exc:
+            # A typed portal/browser/LLM error — captures richer context
+            # (url, step, timestamp, ...) than a generic exception can;
+            # "error" is kept alongside "message" for backward
+            # compatibility with anything reading the plain-Exception shape.
+            logger.warning(
+                "portal_discovery_failed",
+                portal=portal,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return {"errors": [{"error": str(exc), **exc.to_dict(), "portal": portal}]}
+        except Exception as exc:  # a portal failure must not abort the whole run
+            logger.warning("portal_discovery_failed", portal=portal, error=str(exc))
+            return {"errors": [{"portal": portal, "error": str(exc)}]}
+        for raw in raw_jobs:
+            raw["_source"] = portal
+        return {"discovered_jobs": raw_jobs}
 
-    for raw in raw_jobs:
-        raw["_source"] = portal
-    return {"discovered_jobs": raw_jobs}
+    return {"warnings": [f"Unknown or unconfigured portal: {portal}"]}
 
 
 async def normalize_jobs_node(state: JobAutomationState) -> dict[str, Any]:

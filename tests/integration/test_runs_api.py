@@ -61,6 +61,19 @@ async def test_run_lifecycle_via_api(client):
     assert resumed_body["metrics"]["queued"] >= 1
 
 
+async def test_list_runs(client):
+    await _seed_profile()
+    create_response = await client.post("/api/runs")
+    run_id = create_response.json()["run_id"]
+
+    list_response = await client.get("/api/runs")
+    assert list_response.status_code == 200
+    items = list_response.json()
+    assert any(item["id"] == run_id for item in items)
+    matched = next(item for item in items if item["id"] == run_id)
+    assert matched["status"] == "waiting_human"
+
+
 async def test_get_unknown_run_returns_404(client):
     response = await client.get("/api/runs/does-not-exist")
     assert response.status_code == 404

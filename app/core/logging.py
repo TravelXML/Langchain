@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
+from typing import Any, TextIO
 
 import structlog
 
@@ -37,10 +37,18 @@ def _redact_sensitive(
     return event_dict
 
 
-def configure_logging(settings: Settings) -> None:
+def configure_logging(settings: Settings, *, stream: TextIO = sys.stdout) -> None:
+    """`stream` defaults to stdout (the server's own logs are its whole
+    output, nothing else parses it). `app/cli/main.py` passes stderr
+    instead — a CLI's stdout is a human or a script's parseable product
+    output (JSON, status text), and log lines mixed into it would
+    silently break that, exactly as `tests/integration/test_cli.py`
+    caught when a notification's console log line landed inside what was
+    supposed to be a clean JSON response body.
+    """
     logging.basicConfig(
         format="%(message)s",
-        stream=sys.stdout,
+        stream=stream,
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
     )
 
@@ -63,8 +71,18 @@ def configure_logging(settings: Settings) -> None:
             getattr(logging, settings.log_level.upper(), logging.INFO)
         ),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=True,
+        logger_factory=structlog.PrintLoggerFactory(stream),
+        # Deliberately not cached: a module-level `logger = get_logger(...)`
+        # (the pattern used throughout this codebase) would otherwise
+        # freeze its resolved output stream the *first* time it logs
+        # anything and keep using it even after a later
+        # `configure_logging()` call points elsewhere — exactly what
+        # happens every time `app/cli/main.py`'s startup callback runs
+        # (once per invocation, by design). The negligible per-call
+        # re-resolution cost is the right trade for a local, human-paced
+        # tool; a stale, possibly-closed stream reference in a
+        # correctness-sensitive log path is not.
+        cache_logger_on_first_use=False,
     )
 
 

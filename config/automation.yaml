@@ -13,8 +13,18 @@ limits:
 
 approval:
   mode: manual # manual | hybrid | automatic
+  # hybrid mode only: auto-approve when the job's match score AND every
+  # auto-filled field's confidence both clear these bars, AND no field
+  # was left requiring a human. A missing match_score never auto-approves
+  # (Section 17: never guessed) — falls through to manual review instead.
+  hybrid_min_score: 90
+  hybrid_min_confidence: 0.85
 
 scheduler:
   enabled: false
   timezone: UTC
   schedules: []
+  # Hour (0-23, local to `timezone`) the daily summary notification fires.
+  # Registered whenever `enabled: true`, independent of `schedules` (which
+  # drives discovery runs, not the summary).
+  daily_summary_hour: 18

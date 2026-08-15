@@ -153,6 +153,71 @@ async def test_unknown_application_id_returns_none():
     assert await apply_service.resume_application("does-not-exist", {}) is None
 
 
+async def test_hybrid_mode_auto_approves_a_high_confidence_high_score_application(monkeypatch):
+    """Section 48's carve-out, verified through the real compiled graph
+    (not just the unit-level _hybrid_auto_approves helper) — a
+    high-score, fully-auto-mapped application never pauses for approval
+    at all, unlike every other test in this file.
+    """
+    from app.core.config import get_yaml_config_loader
+
+    loader = get_yaml_config_loader()
+
+    def fake_load(name: str):
+        if name == "automation":
+            return {
+                "approval": {
+                    "mode": "hybrid",
+                    "hybrid_min_score": 90,
+                    "hybrid_min_confidence": 0.7,
+                }
+            }
+        return {}
+
+    monkeypatch.setattr(loader, "load", fake_load)
+
+    await _seed_profile()
+    job = make_job()
+
+    result = await apply_service.start_application(
+        job, form_page_url=fixture_url("simple_application_form.html"), match_score=95.0
+    )
+    assert result is not None
+    assert result.status == "completed"
+    assert result.interrupt is None
+    assert result.application_status == "dry_run_ready"
+
+
+async def test_hybrid_mode_falls_back_to_manual_review_without_a_score(monkeypatch):
+    from app.core.config import get_yaml_config_loader
+
+    loader = get_yaml_config_loader()
+
+    def fake_load(name: str):
+        if name == "automation":
+            return {
+                "approval": {
+                    "mode": "hybrid",
+                    "hybrid_min_score": 90,
+                    "hybrid_min_confidence": 0.7,
+                }
+            }
+        return {}
+
+    monkeypatch.setattr(loader, "load", fake_load)
+
+    await _seed_profile()
+    job = make_job()
+
+    # No match_score passed at all — hybrid mode must never guess.
+    result = await apply_service.start_application(
+        job, form_page_url=fixture_url("simple_application_form.html")
+    )
+    assert result is not None
+    assert result.status == "waiting_human"
+    assert result.interrupt["reason"] == "MANUAL_APPROVAL_REQUIRED"
+
+
 async def test_starting_without_a_candidate_profile_returns_none():
     job = make_job()
     result = await apply_service.start_application(

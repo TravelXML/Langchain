@@ -1,6 +1,9 @@
-# Local-first LLM configuration. Model name comes from the OLLAMA_MODEL
-# env var (see .env.example) — never hardcode a specific model here.
-# Consumed starting Phase 6 (app/llm/).
+# Local-first LLM configuration. Model names come from env vars (see
+# .env.example) — never hardcode a specific model here.
+#
+# routing (Section 37): capability-based model selection. Every capability
+# defaults to the same single configured model — a stronger/faster model
+# per capability is a config-only change, never a code change.
 
 llm:
   provider: ollama
@@ -8,6 +11,16 @@ llm:
   model: ${OLLAMA_MODEL}
   temperature: 0
   timeout_seconds: 120
+  routing:
+    simple_extraction: ${OLLAMA_MODEL}
+    semantic_matching: ${OLLAMA_MODEL}
+    complex_interpretation: ${OLLAMA_MODEL}
+    cover_letter: ${OLLAMA_MODEL}
+
+embeddings:
+  provider: ollama
+  base_url: ${OLLAMA_BASE_URL}
+  model: ${OLLAMA_EMBEDDING_MODEL}
 
 fallback:
   enabled: false

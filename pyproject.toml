@@ -28,7 +28,12 @@ dependencies = [
   "playwright>=1.44",
   "pypdf>=4.2",
   "python-multipart>=0.0.9",
+  "apscheduler>=3.10",
+  "typer>=0.12",
 ]
+
+[project.scripts]
+jobagent = "app.cli.main:app"
 
 [project.optional-dependencies]
 dev = [

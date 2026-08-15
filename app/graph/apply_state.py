@@ -30,6 +30,14 @@ class ApplicationState(TypedDict, total=False):
     job: NormalizedJob
     candidate_profile: CandidateProfile
 
+    # Optional: the discovery graph's MatchResult.overall_score for this
+    # job, if the caller has one (Section 48's hybrid approval mode needs
+    # it). The apply graph deliberately doesn't compute this itself — it
+    # stays independent of the discovery/scoring graph (see this module's
+    # docstring) — so a missing score is "unknown", not "good enough";
+    # hybrid mode never auto-approves without one.
+    match_score: float | None
+
     # Full URLs (file:// for local fixtures today, a real portal's https://
     # URLs once Phase 7 lands) — this graph has no opinion on where pages
     # come from, only that it's given one to open.

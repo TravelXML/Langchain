@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     llm_provider: str = Field(default="ollama", alias="LLM_PROVIDER")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="", alias="OLLAMA_MODEL")
+    ollama_embedding_model: str = Field(default="", alias="OLLAMA_EMBEDDING_MODEL")
     llm_temperature: float = Field(default=0.0, alias="LLM_TEMPERATURE")
     llm_timeout_seconds: int = Field(default=120, alias="LLM_TIMEOUT_SECONDS")
 

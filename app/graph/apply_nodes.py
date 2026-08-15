@@ -112,17 +112,42 @@ async def check_challenges_node(state: ApplicationState) -> dict[str, Any]:
     return {"otp_code": otp_code, "captcha_resolved": captcha_resolved}
 
 
+def _hybrid_auto_approves(state: ApplicationState, approval_config: dict[str, Any]) -> bool:
+    """Section 48: "high confidence + high score can proceed; others
+    require approval." A missing `match_score` (the apply graph doesn't
+    compute one itself — see apply_state.py) is treated as "unknown", not
+    "good enough" — never auto-approved on an absent score, matching
+    Section 17's "never guessed."
+    """
+    match_score = state.get("match_score")
+    min_score = approval_config.get("hybrid_min_score", 90)
+    if match_score is None or match_score < min_score:
+        return False
+
+    mappings = state.get("field_mappings", [])
+    if any(m.requires_human for m in mappings):
+        return False
+
+    min_confidence = approval_config.get("hybrid_min_confidence", 0.85)
+    if not mappings:
+        return False
+    avg_confidence = sum(m.confidence for m in mappings) / len(mappings)
+    return avg_confidence >= min_confidence
+
+
 async def manual_approval_node(state: ApplicationState) -> dict[str, Any]:
     automation = get_yaml_config_loader().load("automation")
-    mode = automation.get("approval", {}).get("mode", "manual")
+    approval_config = automation.get("approval", {})
+    mode = approval_config.get("mode", "manual")
 
     if mode == "automatic":
         return {"approved": True}
 
-    # "manual" and "hybrid" both request a human decision here — Phase 6
-    # doesn't yet implement hybrid's score/confidence auto-approval carve
-    # -out (Section 48); that's a Phase 7+ refinement once there's a real
-    # application queue driving this graph.
+    if mode == "hybrid" and _hybrid_auto_approves(state, approval_config):
+        return {"approved": True}
+
+    # "manual" mode, or "hybrid" that didn't clear the auto-approve bar,
+    # both request a human decision here.
     decision: dict[str, Any] = (
         interrupt(
             {

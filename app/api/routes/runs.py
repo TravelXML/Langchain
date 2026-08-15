@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from datetime import datetime
+from typing import Any
 
-from app.graph import service
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database.session import get_session
+from app.graph import persistence, service
 from app.graph.service import RunResult
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -11,6 +16,29 @@ router = APIRouter(prefix="/api/runs", tags=["runs"])
 
 class ResumeRequest(BaseModel):
     decisions: dict[str, str]
+
+
+class RunListItem(BaseModel):
+    id: str
+    status: str
+    enabled_portals: list[str]
+    metrics: dict[str, Any] | None
+    warnings: list[str]
+    errors: list[dict[str, Any]]
+    completed_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("", response_model=list[RunListItem])
+async def list_runs(
+    limit: int = Query(default=20, le=100),
+    offset: int = 0,
+    session: AsyncSession = Depends(get_session),
+) -> list[RunListItem]:
+    records = await persistence.list_runs(session, limit=limit, offset=offset)
+    return [RunListItem.model_validate(r) for r in records]
 
 
 @router.post("", response_model=RunResult)

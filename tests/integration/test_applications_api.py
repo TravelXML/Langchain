@@ -74,6 +74,43 @@ async def test_resume_unknown_application_returns_404(client):
     assert response.status_code == 404
 
 
+async def test_list_applications(client):
+    await _seed_profile()
+    job = make_job()
+    create_response = await client.post(
+        "/api/applications",
+        json={
+            "job": job.model_dump(mode="json"),
+            "form_page_url": _fixture_url("simple_application_form.html"),
+        },
+    )
+    application_id = create_response.json()["application_id"]
+
+    list_response = await client.get("/api/applications")
+    assert list_response.status_code == 200
+    items = list_response.json()
+    assert any(item["id"] == application_id for item in items)
+    matched = next(item for item in items if item["id"] == application_id)
+    assert matched["status"] == "waiting_human"
+    assert matched["job_id"] == job.id
+
+
+async def test_list_applications_status_filter(client):
+    await _seed_profile()
+    job = make_job()
+    await client.post(
+        "/api/applications",
+        json={
+            "job": job.model_dump(mode="json"),
+            "form_page_url": _fixture_url("simple_application_form.html"),
+        },
+    )
+
+    response = await client.get("/api/applications", params={"status": "dry_run_ready"})
+    assert response.status_code == 200
+    assert response.json() == []
+
+
 async def test_create_application_without_profile_returns_409(client):
     job = make_job()
     response = await client.post(
@@ -84,3 +121,24 @@ async def test_create_application_without_profile_returns_409(client):
         },
     )
     assert response.status_code == 409
+
+
+async def test_create_duplicate_application_for_same_job_returns_409(client):
+    await _seed_profile()
+    job = make_job()
+    body = {
+        "job": job.model_dump(mode="json"),
+        "form_page_url": _fixture_url("simple_application_form.html"),
+    }
+
+    first = await client.post("/api/applications", json=body)
+    assert first.status_code == 200, first.text
+
+    second = await client.post("/api/applications", json=body)
+    assert second.status_code == 409
+    assert "already exists" in second.json()["detail"]
+
+    # The duplicate attempt must not have created a second row.
+    listing = await client.get("/api/applications")
+    matching = [a for a in listing.json() if a["job_id"] == job.id]
+    assert len(matching) == 1
